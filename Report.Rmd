@@ -1,0 +1,55 @@
+---
+title: "Stroke Outcomes Analysis Report"
+author: "Dom Fenoglio, Sonya Eason, Alayna Binder"
+date: "December 4, 2025"
+output: 
+  bookdown::pdf_document2:
+    number_sections: true
+    toc: false
+---
+
+<!-- NOTE: To reference a figure in the report body, do \@ref(fig:NameOfFig). -->
+
+# Background
+
+
+
+## The Data
+
+
+
+## Exploratory Data Analysis
+
+
+
+# Our Model
+
+## Model rationale
+
+
+
+## Model implementation and evaluation
+
+
+
+## Model results
+
+
+
+# Shortcomings and Future Work
+
+
+
+# Conclusion
+
+
+
+\newpage
+
+# Appendix
+
+## Tables and Figures
+
+```{r label = "NameOfFig", echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "INSERT CAPTION HERE", fig.show = 'hold'}
+
+```
