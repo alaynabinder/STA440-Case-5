@@ -3,3 +3,107 @@ title: "Analysis"
 output: html_document
 ---
 
+```{r}
+library(tidyverse)
+```
+
+```{r}
+load("strokeStudy.RData")
+
+# Remove NAs from outcome
+x <- x |>
+  filter(!is.na(homeOrRehab))
+```
+
+# EDA (MISSINGNESS)
+
+```{r}
+#| label: missingness-by-outcome
+
+missing_vars <- c("Age", "PreHospNotify", "EMSvsCar")
+
+x_missing_outcome <- x |>
+  mutate(
+    homeOrRehab = factor(homeOrRehab),
+    across(all_of(missing_vars), as.character)
+  ) |>
+  pivot_longer(
+    cols = all_of(missing_vars),
+    names_to = "variable",
+    values_to = "value"
+  ) |>
+  mutate(is_missing = is.na(value)) |>
+  group_by(variable, homeOrRehab) |>
+  summarize(prop_missing = mean(is_missing), .groups = "drop")
+
+ggplot(x_missing_outcome,
+       aes(x = homeOrRehab, y = prop_missing, fill = homeOrRehab)) +
+  geom_col() +
+  facet_wrap(~ variable) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(
+    title = "Missingness by Outcome",
+    x = "Outcome",
+    y = "Percent Missing"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+```{r}
+#| label: missingness-by-site-and-time
+
+missing_by_site_time <- x |>
+  select(siteID, Time2, all_of(missing_vars)) |>
+  mutate(across(all_of(missing_vars), as.character)) |>
+  pivot_longer(
+    cols = all_of(missing_vars),
+    names_to = "variable",
+    values_to = "value"
+  ) |>
+  mutate(is_missing = is.na(value)) |>
+  group_by(siteID, Time2, variable) |>
+  summarize(prop_missing = mean(is_missing), .groups = "drop")
+
+ggplot(missing_by_site_time,
+       aes(x = Time2, y = siteID, fill = prop_missing)) +
+  geom_tile() +
+  facet_wrap(~ variable, nrow = 2) +
+  scale_fill_continuous(labels = scales::percent_format()) +
+  labs(
+    title = "Missingness by Site and Time",
+    x = "Study Quarter",
+    y = "Site",
+    fill = "Percent Missing"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 30, hjust = 1, size = 8),
+    strip.text = element_text(size = 12)
+  )
+```
+
+# DATA CLEANING / IMPUTATION
+
+```{r}
+
+```
+
+# EDA (POST IMPUTATION)
+
+```{r}
+
+```
+
+# FREQUENTIST ANALYSIS
+
+```{r}
+
+```
+
+# BAYESIAN ANALYSIS
+
+```{r}
+
+```
+
