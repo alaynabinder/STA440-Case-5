@@ -85,11 +85,176 @@ ggplot(missing_by_site_time,
 
 # DATA CLEANING / IMPUTATION
 
+## Packages
+
+```{r}
+library(dplyr)
+```
+
+## Data Cleaning
+
+
+```{r}
+strokes <- x
+strokes$EMSvsCar <- factor(strokes$EMSvsCar)
+```
+
+
+## Missingness
+
+### First impute age, then EMS vs Car,  then Notify
+
+I chose this order because of the dependency thing (unless I misunderstood that). 
+
+
+PreHospNotify cannot be imputed without knowing EMSvsCar first. --> this is because when EMSvsCar = 1, PreHospNotify has be No.
+
+See
+```{r}
+strokes |> group_by(strokes$EMSvsCar, PreHospNotify) |> count()
+```
+
+
+We need to maintain the constraint thought that if it's car, there won't be notify. --> I asked and because there's not a forced rule for when EMS vs Car equals 1, i.e. EMS could be PreHospNotify = YES or NO when it's 1. It recommended resolving using post-processing. 
+
+```{r}
+library(mice)
+
+# Select relevant variables or full dataset
+data <- strokes |>
+  select(-siteID)
+
+# STEP 1: Specify imputation methods
+# "" means: do NOT impute the variable
+method <- make.method(data)
+
+method["Age"] <- "pmm"
+method["EMSvsCar"] <- "logreg"         # assuming it's binary
+method["PreHospNotify"] <- "logreg"    # assuming it's binary
+
+# Make sure NO OTHER variables are imputed
+for (v in names(method)) {
+  if (!v %in% c("Age", "EMSvsCar", "PreHospNotify")) {
+    method[v] <- ""
+  }
+}
+
+# STEP 2: Build predictor matrix
+pred <- make.predictorMatrix(data)
+
+# Remove self-prediction
+pred["Age", "Age"] <- 0
+pred["EMSvsCar", "EMSvsCar"] <- 0
+pred["PreHospNotify", "PreHospNotify"] <- 0
+
+# (OPTIONAL) If you want all variables to predict the three variables,
+# keep predictor matrix as is.
+# Or customize:
+# pred["EMSvsCar", ] <- 0
+# pred["EMSvsCar", c("Age")] <- 1
+
+# STEP 3: Set the order of imputation
+visitSequence <- c("Age", "EMSvsCar", "PreHospNotify")
+
+# STEP 4: Run MICE
+imp <- mice(
+  data,
+  m = 20,
+  method = method,
+  predictorMatrix = pred,
+  visitSequence = visitSequence,
+  maxit = 20,
+  print = FALSE
+)
+
+```
+### my post-processing
+
+holds that all cases where EMS vs Car = 0, there won't be a prehospital notify  
+
+```{r}
+completed_list <- mice::complete(imp, action = "all")
+
+# Define the categories exactly as they appear in your data
+fix_rule <- function(df) {
+  df$PreHospNotify[df$EMSvsCar == 1] <- "No"
+  return(df)
+}
+
+completed_fixed <- lapply(completed_list, fix_rule)
+
+
+```
+
+
+### Rule out MNAR
+
+Need to validate we can make the MAR assumption. These are diagnostics. 
+
+
+##### Sensitivity for Age
+```{r}
+delta_values <- c(-2, 0, 2, 5)
+
+library(dplyr)
+
+sensitivity_age <- lapply(delta_values, function(delta) {
+  adjusted <- complete(imp, "long") %>%
+    mutate(Age = ifelse(.imp > 0, Age + delta, Age))
+  
+  list(delta = delta, data = adjusted)
+})
+
+```
+
+### Sensitivity for EMS vs Car
+
+```{r}
+library(miceadds)
+
+delta_binary <- c(-1, 0, 1)
+
+sensitivity_ems <- lapply(delta_binary, function(delta) {
+  miceadds::mice.impute.delta(
+    imp = imp, 
+    variable = "EMSvsCar",
+    delta = delta
+  )
+})
+
+```
+
+#### Sensitivity for PreHosp Notify
+
+```{r}
+sensitivity_pre <- lapply(delta_binary, function(delta) {
+  miceadds::mice.impute.delta(
+    imp = imp,
+    variable = "PreHospNotify",
+    delta = delta
+  )
+})
+
+```
+
+#### Sensitivity Results
+
+
+```{r}
+model_results <- lapply(sensitivity_age, function(s) {
+  with(mice::as.mids(s$data), glm(StrokeOutcome ~ Age + EMSvsCar + PreHospNotify, family=binomial))
+})
+
+pooled_results <- lapply(model_results, pool)
+```
+
 ```{r}
 
 ```
 
 # EDA (POST IMPUTATION)
+
+
 
 ```{r}
 
