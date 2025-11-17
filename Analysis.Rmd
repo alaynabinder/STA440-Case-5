@@ -16,6 +16,11 @@ x <- x |>
 ```
 
 
+```{r}
+x$siteID <- as.character(x$siteID)
+unique(x$siteID)
+
+```
 
 
 # EDA (MISSINGNESS)
@@ -152,6 +157,8 @@ strokes |> group_by(strokes$EMSvsCar, PreHospNotify) |> count()
 
 We need to maintain the constraint thought that if it's car, there won't be notify. --> I asked and because there's not a forced rule for when EMS vs Car equals 1, i.e. EMS could be PreHospNotify = YES or NO when it's 1. It recommended resolving using post-processing. 
 
+
+
 ```{r}
 library(mice)
 
@@ -159,6 +166,8 @@ library(mice)
 #data <- strokes |>
   #select(-siteID)
 
+
+strokes$siteID <-factor(strokes$siteID)
 data <- strokes
 
 # STEP 1: Specify imputation methods
