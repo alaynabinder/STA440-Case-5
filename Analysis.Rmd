@@ -11,7 +11,6 @@ library(tidyverse)
 load("strokeStudy.RData")
 ```
 
-<<<<<<< HEAD
 
 ```{r}
 x$siteID <- as.character(x$siteID)
@@ -20,8 +19,6 @@ unique(x$siteID)
 ```
 
 
-=======
->>>>>>> 1286d651b11bf34baf0f50cdab017328ed4394b0
 # EDA (MISSINGNESS)
 
 ```{r}
@@ -582,18 +579,23 @@ ggplot(assoc_df, aes(x = Level, y = prop_favorable)) +
 
 ```{r}
 library(pROC)
+library(lme4)
 results = NULL
 AUCs = NULL
-for (i in 1:5){
+for (i in 1:20){
   data <- completed_fixed[[i]]
   data$homeOrRehab <- if_else(data$homeOrRehab,1,0)
-  modelFit <- glm(factor(homeOrRehab) ~ . - tpaComplic - , data = data, family = "binomial")
+  modelFit <- glm(factor(homeOrRehab) ~ . - tpaComplic, data = data, family = "binomial")
   AUCs <- c(AUCs,auc(data$homeOrRehab,predict(modelFit,data)))
   plot.roc(data$homeOrRehab,predict(modelFit,data))
   results <- c(results, list(summary(modelFit)))
 }
-results[[1]]
-AUCs
+results[[1]]$coefficients |> 
+  as.data.frame() |> 
+  select(-`z value`) |> 
+  kableExtra::kable()
+data.frame(iter = seq(1,20), AUC = AUCs) |> 
+  kableExtra::kable()
 ```
 
 # BAYESIAN ANALYSIS
