@@ -450,7 +450,8 @@ ggplot(age_compare, aes(x = Age, fill = factor(.imp))) +
     y = "Density",
     fill = "Dataset"
   ) +
-  theme_minimal()
+  theme_minimal() +
+  facet_wrap(~factor(.imp))
 ```
 
 ```{r}
