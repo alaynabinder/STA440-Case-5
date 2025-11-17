@@ -243,6 +243,63 @@ Need to validate we can make the MAR assumption. These are diagnostics.
 
 
 ```{r}
+flip_some <- function(x, prop = 0.1) {
+  # x: factor with 2 levels
+  levels_x <- levels(x)
+  if(length(levels_x) < 2) return(x)  # cannot flip
+  idx <- sample(which(x == levels_x[1]), size = floor(prop*sum(x==levels_x[1])))
+  x[idx] <- levels_x[2]
+  return(x)
+}
+
+delta_age <- c(-1, 0, 1)  # small numeric shifts
+delta_ems <- c(-1, 0, 1)  # only flip some cases
+delta_pre <- c("flip_some", "none")
+
+sensitivity_results <- list()
+
+for(a in delta_age){
+  for(e in delta_ems){
+    for(pn in delta_pre){
+      
+      adjusted_dfs <- lapply(completed_fixed, function(df){
+        df_new <- df
+        
+        # AGE adjustment
+        df_new$Age <- df_new$Age + a
+        
+        # EMSvsCar adjustment (flip some)
+        if(e != 0){
+          df_new$EMSvsCar <- flip_some(df_new$EMSvsCar, prop = 0.1)
+        }
+        
+        # PreHospNotify adjustment (flip some)
+        if(pn == "flip_some"){
+          df_new$PreHospNotify <- flip_some(df_new$PreHospNotify, prop = 0.1)
+        }
+        
+        df_new
+      })
+      
+      # Fit models and pool
+      model_list <- lapply(adjusted_dfs, function(df){
+        glm(homeOrRehab ~ Age + EMSvsCar + PreHospNotify,
+            data = df, family = binomial)
+      })
+      
+      pooled <- pool(model_list)
+      pooled_summary <- summary(pooled)
+      
+      scenario_name <- paste0("Age_", a, "_EMS_", e, "_Pre_", pn)
+      sensitivity_results[[scenario_name]] <- pooled_summary
+    }
+  }
+}
+
+```
+
+
+```{r}
 ##### SENSITIVITY ANALYSIS — Age + EMSvsCar + PreHospNotify #####
 
 library(dplyr)
@@ -326,23 +383,41 @@ for(a in delta_age){
   }
 }
 
-##### 3. Example: view a scenario #####
-sensitivity_results[["Age_0_EMS_0_Pre_none"]]
-
 ```
+
 
 
 ```{r}
-model_results <- lapply(sensitivity_age, function(s) {
-  with(mice::as.mids(s$data), glm(StrokeOutcome ~ Age + EMSvsCar + PreHospNotify, family=binomial))
-})
+library(dplyr)
 
-pooled_results <- lapply(model_results, pool)
+# Extract key variables (Age, EMSvsCar, PreHospNotify)
+extract_var <- function(var_name){
+  lapply(names(sensitivity_results), function(s){
+    res <- sensitivity_results[[s]]
+    
+    # Skip if not a data frame
+    if(!is.data.frame(res)) return(NULL)
+    
+    # Filter variable row
+    df <- res %>%
+      filter(term == var_name) %>%
+      select(term, estimate, std.error, p.value) %>%
+      mutate(scenario = s)
+    
+    df
+  }) %>% bind_rows()
+}
+
+# Get estimates for each variable
+age_results <- extract_var("Age")
+ems_results <- extract_var("EMSvsCar")
+pre_results <- extract_var("PreHospNotify")
+
+
 ```
 
-```{r}
 
-```
+
 
 # EDA (POST IMPUTATION)
 
