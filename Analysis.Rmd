@@ -11,6 +11,14 @@ library(tidyverse)
 load("strokeStudy.RData")
 ```
 
+
+```{r}
+x$siteID <- as.character(x$siteID)
+unique(x$siteID)
+
+```
+
+
 # EDA (MISSINGNESS)
 
 ```{r}
@@ -152,6 +160,8 @@ strokes |> group_by(strokes$EMSvsCar, PreHospNotify) |> count()
 
 We need to maintain the constraint thought that if it's car, there won't be notify. --> I asked and because there's not a forced rule for when EMS vs Car equals 1, i.e. EMS could be PreHospNotify = YES or NO when it's 1. It recommended resolving using post-processing. 
 
+
+
 ```{r}
 library(mice)
 
@@ -159,6 +169,8 @@ library(mice)
 #data <- strokes |>
   #select(-siteID)
 
+
+strokes$siteID <-factor(strokes$siteID)
 data <- strokes
 
 # STEP 1: Specify imputation methods
@@ -457,29 +469,6 @@ Now onto EDA for association:
 
 ```{r fig.width=18, fig.height=10}
 # just doing eda with 1st bc distributions roughly the same - obviously we would want to use all for prediction, but more lax in this case
-eda_df <- completed_fixed[[1]] |>
-  mutate(
-    Disposition = factor(
-      homeOrRehab,
-      levels = c(0, 1),
-      labels = c("Unfavorable Discharge", "Favorable Discharge")
-    ),
-    AgeGroup = cut(
-      Age,
-      breaks = c(0, 50, 65, 75, 85, Inf),
-      labels = c("<50", "50–64", "65–74", "75–84", "85+"),
-      right = FALSE
-    ),
-    Gender = factor(Gender),
-    Race2 = factor(Race2),
-    ArrivalMode = factor(EMSvsCar, labels = c("Car", "EMS")),
-    PreHospitalNotification = factor(PreHospNotify),
-    Thrombectomy = factor(hadThrombectomy),
-    TPAComplication = factor(tpaComplic),
-    ThrombectomyComplication = factor(thrComplic),
-    StudyQuarter = factor(Time2)
-  )
-
 assoc_df <- eda_df |>
   select(
     Disposition,
@@ -500,7 +489,9 @@ assoc_df <- eda_df |>
   ) |>
   group_by(Variable, Level) |>
   summarize(
+    n = n(),
     prop_favorable = mean(Disposition == "Favorable Discharge"),
+    se = sqrt(prop_favorable * (1 - prop_favorable) / n),
     .groups = "drop"
   ) |>
   mutate(
@@ -520,6 +511,13 @@ assoc_df <- eda_df |>
 
 ggplot(assoc_df, aes(x = Level, y = prop_favorable)) +
   geom_col(fill = "#4472C4") +
+  geom_errorbar(
+    aes(
+      ymin = prop_favorable - 1.96 * se,
+      ymax = prop_favorable + 1.96 * se
+    ),
+    width = 0.2
+  ) +
   facet_wrap(~ Variable, scales = "free_x", nrow = 2) +
   scale_y_continuous(labels = scales::percent_format(), limits = c(0, 1)) +
   labs(
@@ -535,9 +533,6 @@ ggplot(assoc_df, aes(x = Level, y = prop_favorable)) +
     plot.title = element_text(size = 20, face = "bold")
   )
 ```
-```{r}
-
-```
 
 
 # FREQUENTIST ANALYSIS
@@ -550,7 +545,7 @@ AUCs = NULL
 for (i in 1:20){
   data <- completed_fixed[[i]]
   data$homeOrRehab <- if_else(data$homeOrRehab,1,0)
-  modelFit <- glm(factor(homeOrRehab) ~ . - tpaComplic , data = data, family = "binomial")
+  modelFit <- glm(factor(homeOrRehab) ~ . - tpaComplic, data = data, family = "binomial")
   AUCs <- c(AUCs,auc(data$homeOrRehab,predict(modelFit,data)))
   plot.roc(data$homeOrRehab,predict(modelFit,data))
   results <- c(results, list(summary(modelFit)))
