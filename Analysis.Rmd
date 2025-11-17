@@ -299,91 +299,6 @@ for(a in delta_age){
 ```
 
 
-```{r}
-##### SENSITIVITY ANALYSIS — Age + EMSvsCar + PreHospNotify #####
-
-library(dplyr)
-library(mice)
-library(broom)
-
-# 1. Define delta values
-delta_age <- c(-2, 0, 2, 5)                        # numeric adjustments
-delta_ems <- c(-1, 0, 1)                           # 0/1 flips
-delta_pre <- c("flip_to_no", "none", "flip_to_yes")# categorical flips
-
-# Storage
-sensitivity_results <- list()
-
-# 2. Loop through all effects
-for(a in delta_age){
-  for(e in delta_ems){
-    for(pn in delta_pre){
-      
-      adjusted_dfs <- lapply(completed_fixed, function(df){
-        df_new <- df
-        
-        ##### AGE adjustment #####
-        df_new$Age <- df_new$Age + a
-        
-        ##### EMSvsCar flips #####
-        if(e == -1){
-          df_new$EMSvsCar[df_new$EMSvsCar == 1] <- 0
-        } else if(e == 1){
-          df_new$EMSvsCar[df_new$EMSvsCar == 0] <- 1
-        }
-        
-        ##### PreHospNotify flips #####
-        if(pn == "flip_to_no"){
-          df_new$PreHospNotify[df_new$PreHospNotify == "Yes"] <- "No"
-        } else if(pn == "flip_to_yes"){
-          df_new$PreHospNotify[df_new$PreHospNotify == "No"] <- "Yes"
-        }
-        
-        ##### SAFETY CHECKS #####
-        # EMSvsCar must have 2 levels
-        if(length(unique(df_new$EMSvsCar)) < 2){
-          return(NULL)
-        }
-        
-        # PreHospNotify must have 2 levels
-        if(length(unique(df_new$PreHospNotify)) < 2){
-          return(NULL)
-        }
-        
-        df_new
-      })
-      
-      # Remove NULL datasets created by safety checks
-      adjusted_dfs <- Filter(Negate(is.null), adjusted_dfs)
-      
-      # If ALL datasets collapsing → skip scenario
-      if(length(adjusted_dfs) == 0){
-        scenario_name <- paste0("Age_", a, "_EMS_", e, "_Pre_", pn)
-        sensitivity_results[[scenario_name]] <- "SKIPPED (variable collapsed)"
-        next
-      }
-      
-      ##### Fit logistic models #####
-      model_list <- lapply(adjusted_dfs, function(df){
-        glm(
-          homeOrRehab ~ Age + EMSvsCar + PreHospNotify,
-          data = df,
-          family = binomial
-        )
-      })
-      
-      ##### Pool results #####
-      pooled <- pool(model_list)
-      pooled_summary <- summary(pooled)
-      
-      ##### Save scenario #####
-      scenario_name <- paste0("Age_", a, "_EMS_", e, "_Pre_", pn)
-      sensitivity_results[[scenario_name]] <- pooled_summary
-    }
-  }
-}
-
-```
 
 
 
@@ -416,6 +331,36 @@ pre_results <- extract_var("PreHospNotify")
 
 ```
 
+```{r}
+library(ggplot2)
+
+# Combine all variables into one data frame for plotting
+sensitivity_plot_data <- bind_rows(
+  age_results %>% mutate(variable = "Age"),
+  ems_results %>% mutate(variable = "EMSvsCar"),
+  pre_results %>% mutate(variable = "PreHospNotify")
+)
+
+# Optional: create a simpler scenario label
+sensitivity_plot_data <- sensitivity_plot_data %>%
+  mutate(scenario_short = gsub("Age_|_EMS_|_Pre_", "", scenario))
+
+# Plot
+ggplot(sensitivity_plot_data, aes(x = scenario, y = estimate, color = variable)) +
+  geom_point(position = position_dodge(width = 0.5)) +
+  geom_errorbar(aes(ymin = estimate - 1.96*std.error, ymax = estimate + 1.96*std.error),
+                width = 0.2, position = position_dodge(width = 0.5)) +
+  facet_wrap(~ variable, scales = "free_y") +
+  labs(
+    title = "Sensitivity Analysis: Effect Estimates Across Scenarios",
+    x = "Scenario",
+    y = "Estimated Coefficient (log-odds)",
+    color = "Variable"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
 
 
 
