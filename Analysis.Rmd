@@ -587,9 +587,10 @@ for (i in 1:20){
   data$homeOrRehab <- if_else(data$homeOrRehab,1,0)
   modelFit <- glm(factor(homeOrRehab) ~ . - tpaComplic, data = data, family = "binomial")
   AUCs <- c(AUCs,auc(data$homeOrRehab,predict(modelFit,data)))
-  plot.roc(data$homeOrRehab,predict(modelFit,data))
   results <- c(results, list(summary(modelFit)))
 }
+#arm::binnedplot(fitted(modelFit),residuals(modelFit))
+plot.roc(data$homeOrRehab,predict(modelFit,data))
 results[[1]]$coefficients |> 
   as.data.frame() |> 
   select(-`z value`) |> 
@@ -601,6 +602,6 @@ data.frame(iter = seq(1,20), AUC = AUCs) |>
 # BAYESIAN ANALYSIS
 
 ```{r}
-roc(data$homeOrRehab,predict(modelFit,data))
+
 ```
 
