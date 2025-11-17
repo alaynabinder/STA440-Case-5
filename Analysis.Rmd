@@ -137,7 +137,7 @@ table(strokes$TPA_group)
 
 strokes <- strokes |>
   select(-hadTPA) |>
-  select(-TPA_group)
+  select(-tpaComplic)
 
 ```
 There is some correlation with hadTP and tpaComplication, so we made a new variable and removed the other two.
@@ -243,7 +243,7 @@ Need to validate we can make the MAR assumption. These are diagnostics.
 
 
 ```{r}
-##### COMBINED SENSITIVITY ANALYSIS #####
+##### SENSITIVITY ANALYSIS — Age + EMSvsCar + PreHospNotify #####
 
 library(dplyr)
 library(mice)
@@ -251,120 +251,85 @@ library(broom)
 
 # 1. Define delta values
 delta_age <- c(-2, 0, 2, 5)                        # numeric adjustments
-delta_ems <- c(-1, 0, 1)                            # 0/1 flips
-delta_pre <- c("flip_to_no", "none", "flip_to_yes") # categorical flips
+delta_ems <- c(-1, 0, 1)                           # 0/1 flips
+delta_pre <- c("flip_to_no", "none", "flip_to_yes")# categorical flips
 
-# 2. Loop through all deltas and adjust completed datasets
+# Storage
 sensitivity_results <- list()
 
+# 2. Loop through all effects
 for(a in delta_age){
   for(e in delta_ems){
-    for(p in delta_pre){
+    for(pn in delta_pre){
       
-      # Adjust each completed dataset
       adjusted_dfs <- lapply(completed_fixed, function(df){
         df_new <- df
         
-        # Age adjustment
+        ##### AGE adjustment #####
         df_new$Age <- df_new$Age + a
         
-        # EMSvsCar adjustment
+        ##### EMSvsCar flips #####
         if(e == -1){
           df_new$EMSvsCar[df_new$EMSvsCar == 1] <- 0
         } else if(e == 1){
           df_new$EMSvsCar[df_new$EMSvsCar == 0] <- 1
         }
         
-        # PreHospNotify adjustment
-        if(p == "flip_to_no"){
+        ##### PreHospNotify flips #####
+        if(pn == "flip_to_no"){
           df_new$PreHospNotify[df_new$PreHospNotify == "Yes"] <- "No"
-        } else if(p == "flip_to_yes"){
+        } else if(pn == "flip_to_yes"){
           df_new$PreHospNotify[df_new$PreHospNotify == "No"] <- "Yes"
         }
         
-        return(df_new)
+        ##### SAFETY CHECKS #####
+        # EMSvsCar must have 2 levels
+        if(length(unique(df_new$EMSvsCar)) < 2){
+          return(NULL)
+        }
+        
+        # PreHospNotify must have 2 levels
+        if(length(unique(df_new$PreHospNotify)) < 2){
+          return(NULL)
+        }
+        
+        df_new
       })
       
-      # Fit logistic regression on each imputed dataset
+      # Remove NULL datasets created by safety checks
+      adjusted_dfs <- Filter(Negate(is.null), adjusted_dfs)
+      
+      # If ALL datasets collapsing → skip scenario
+      if(length(adjusted_dfs) == 0){
+        scenario_name <- paste0("Age_", a, "_EMS_", e, "_Pre_", pn)
+        sensitivity_results[[scenario_name]] <- "SKIPPED (variable collapsed)"
+        next
+      }
+      
+      ##### Fit logistic models #####
       model_list <- lapply(adjusted_dfs, function(df){
-        glm(homeOrRehab ~ Age + EMSvsCar + PreHospNotify, 
-            data = df, family = binomial)
+        glm(
+          homeOrRehab ~ Age + EMSvsCar + PreHospNotify,
+          data = df,
+          family = binomial
+        )
       })
       
-      # Pool results across imputations
+      ##### Pool results #####
       pooled <- pool(model_list)
+      pooled_summary <- summary(pooled)
       
-      # Save results with scenario labels
-      scenario_name <- paste0("Age_", a, "_EMS_", e, "_Pre_", p)
-      sensitivity_results[[scenario_name]] <- summary(pooled)
-      
+      ##### Save scenario #####
+      scenario_name <- paste0("Age_", a, "_EMS_", e, "_Pre_", pn)
+      sensitivity_results[[scenario_name]] <- pooled_summary
     }
   }
 }
 
-# 3. Example: view results for one scenario
+##### 3. Example: view a scenario #####
 sensitivity_results[["Age_0_EMS_0_Pre_none"]]
 
 ```
-
-##### Sensitivity for Age
-```{r}
-delta_values <- c(-2, 0, 2, 5)
-
-library(dplyr)
-
-sensitivity_age <- lapply(delta_values, function(delta) {
-  adjusted <- complete(imp, "long") %>%
-    mutate(Age = ifelse(.imp > 0, Age + delta, Age))
-  
-  list(delta = delta, data = adjusted)
-})
-
-```
-
-### Sensitivity for EMS vs Car
-
-
-```{r}
-# Suppose EMSvsCar is 0/1
-delta_binary <- c(-1, 0, 1) # meaning: flip 0→1 or 1→0 for sensitivity
-
-sensitivity_ems <- lapply(delta_binary, function(delta) {
-  lapply(completed_fixed, function(df) {
-    df_new <- df
-    if(delta == -1){
-      df_new$EMSvsCar[df_new$EMSvsCar == 1] <- 0
-    } else if(delta == 1){
-      df_new$EMSvsCar[df_new$EMSvsCar == 0] <- 1
-    }
-    return(df_new)
-  })
-})
-
-```
-
-
-
-#### Sensitivity for PreHosp Notify
-
-```{r}
-delta_pre <- c("flip_to_no", "none", "flip_to_yes")
-
-sensitivity_pre <- lapply(delta_pre, function(delta) {
-  lapply(completed_fixed, function(df) {
-    df_new <- df
-    if(delta == "flip_to_no") {
-      df_new$PreHospNotify[df_new$PreHospNotify == "Yes"] <- "No"
-    } else if(delta == "flip_to_yes") {
-      df_new$PreHospNotify[df_new$PreHospNotify == "No"] <- "Yes"
-    }
-    return(df_new)
-  })
-})
-
-```
-
-#### Sensitivity Results
 
 
 ```{r}
