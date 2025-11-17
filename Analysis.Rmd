@@ -9,12 +9,9 @@ library(tidyverse)
 
 ```{r}
 load("strokeStudy.RData")
-
-# Remove NAs from outcome
-x <- x |>
-  filter(!is.na(homeOrRehab))
 ```
 
+<<<<<<< HEAD
 
 ```{r}
 x$siteID <- as.character(x$siteID)
@@ -23,10 +20,16 @@ unique(x$siteID)
 ```
 
 
+=======
+>>>>>>> 1286d651b11bf34baf0f50cdab017328ed4394b0
 # EDA (MISSINGNESS)
 
 ```{r}
 #| label: missingness-by-outcome
+
+# Remove NAs from outcome
+x <- x |>
+  filter(!is.na(homeOrRehab))
 
 missing_vars <- c("Age", "PreHospNotify", "EMSvsCar")
 
@@ -89,6 +92,9 @@ ggplot(missing_by_site_time,
     axis.text.x = element_text(angle = 30, hjust = 1, size = 8),
     strip.text = element_text(size = 12)
   )
+
+library(mice)
+md.pattern(x,rotate.names = TRUE)
 ```
 
 # DATA CLEANING / IMPUTATION
@@ -378,21 +384,181 @@ pooled_results <- lapply(model_results, pool)
 
 # EDA (POST IMPUTATION)
 
-
+First is just checking the distributions pre and post imputation (they should be approximately the same):
 
 ```{r}
+# Combining all completed datasets into a long dataframe
+post_imp_long <- bind_rows(
+  lapply(seq_along(completed_fixed), function(i) {
+    completed_fixed[[i]] |> mutate(.imp = i)
+  })
+)
 
+# Age
+orig <- x |> mutate(.imp = "Original")
+
+post_imp_long2 <- post_imp_long |> 
+  mutate(.imp = as.character(.imp))
+
+age_compare <- bind_rows(
+  orig |> select(Age, .imp),
+  post_imp_long2 |> select(Age, .imp)
+)
+
+ggplot(age_compare, aes(x = Age, fill = factor(.imp))) +
+  geom_density(alpha = 0.2) +
+  labs(
+    title = "Age Distribution: Original vs. Imputed Datasets",
+    x = "Age",
+    y = "Density",
+    fill = "Dataset"
+  ) +
+  theme_minimal()
 ```
+
+```{r}
+# EMSvsCar, PreHospNotify
+orig_summary <- x |>
+  summarize(
+    EMSvsCar = mean(EMSvsCar == 1, na.rm = TRUE),
+    PreHospNotify = mean(PreHospNotify == "Yes", na.rm = TRUE)
+  ) |>
+  mutate(.imp = "Original") |>
+  pivot_longer(
+    cols = c("EMSvsCar", "PreHospNotify"),
+    names_to = "variable",
+    values_to = "prop_yes"
+  )
+
+imp_summary <- post_imp_long |>
+  mutate(
+    .imp = as.character(.imp),
+    EMSvsCar = as.numeric(as.character(EMSvsCar)),
+    PreHospNotify = as.character(PreHospNotify)
+  ) |>
+  group_by(.imp) |>
+  summarize(
+    EMSvsCar = mean(EMSvsCar == 1, na.rm = TRUE),
+    PreHospNotify = mean(PreHospNotify == "Yes", na.rm = TRUE)
+  ) |>
+  pivot_longer(
+    cols = c("EMSvsCar", "PreHospNotify"),
+    names_to = "variable",
+    values_to = "prop_yes"
+  )
+
+binary_summary_all <- binary_summary_all |>
+  mutate(
+    .imp = factor(.imp, levels = c("Original", as.character(1:20)))
+  )
+
+ggplot(binary_summary_all, aes(x = .imp, y = prop_yes, fill = (.imp == "Original"))) +
+  geom_col() +
+  facet_wrap(~ variable, nrow = 1) +
+  scale_fill_manual(values = c("grey70", "tomato"), guide = "none") +
+  labs(
+    title = "Proportion of Binary Variables: Original vs. Imputed Datasets",
+    x = "Dataset",
+    y = "Proportion 'Yes'"
+  ) +
+  coord_cartesian(ylim = c(0, 1)) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+Now onto EDA for association:
+
+```{r fig.width=18, fig.height=10}
+# just doing eda with 1st bc distributions roughly the same - obviously we would want to use all for prediction, but more lax in this case
+assoc_df <- eda_df |>
+  select(
+    Disposition,
+    AgeGroup,
+    Gender,
+    Race2,
+    ArrivalMode,
+    PreHospitalNotification,
+    Thrombectomy,
+    TPAComplication,
+    ThrombectomyComplication,
+    StudyQuarter
+  ) |>
+  pivot_longer(
+    cols = -Disposition,
+    names_to = "Variable",
+    values_to = "Level"
+  ) |>
+  group_by(Variable, Level) |>
+  summarize(
+    n = n(),
+    prop_favorable = mean(Disposition == "Favorable Discharge"),
+    se = sqrt(prop_favorable * (1 - prop_favorable) / n),
+    .groups = "drop"
+  ) |>
+  mutate(
+    Variable = recode(
+      Variable,
+      AgeGroup = "Age Group",
+      Gender = "Gender",
+      Race2 = "Race",
+      ArrivalMode = "Arrival Mode",
+      PreHospitalNotification = "Pre-Hospital Notification",
+      Thrombectomy = "Thrombectomy",
+      TPAComplication = "TPA Complication",
+      ThrombectomyComplication = "Thrombectomy Complication",
+      StudyQuarter = "Study Quarter"
+    )
+  )
+
+ggplot(assoc_df, aes(x = Level, y = prop_favorable)) +
+  geom_col(fill = "#4472C4") +
+  geom_errorbar(
+    aes(
+      ymin = prop_favorable - 1.96 * se,
+      ymax = prop_favorable + 1.96 * se
+    ),
+    width = 0.2
+  ) +
+  facet_wrap(~ Variable, scales = "free_x", nrow = 2) +
+  scale_y_continuous(labels = scales::percent_format(), limits = c(0, 1)) +
+  labs(
+    title = "Association Between Predictors and Favorable Discharge",
+    x = "",
+    y = "Percent Favorable Discharge"
+  ) +
+  theme_minimal(base_size = 15) +
+  theme(
+    strip.text = element_text(face = "bold", size = 16),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 20, face = "bold")
+  )
+```
+
 
 # FREQUENTIST ANALYSIS
 
 ```{r}
-
+library(pROC)
+results = NULL
+AUCs = NULL
+for (i in 1:5){
+  data <- completed_fixed[[i]]
+  data$homeOrRehab <- if_else(data$homeOrRehab,1,0)
+  modelFit <- glm(factor(homeOrRehab) ~ . - tpaComplic - , data = data, family = "binomial")
+  AUCs <- c(AUCs,auc(data$homeOrRehab,predict(modelFit,data)))
+  plot.roc(data$homeOrRehab,predict(modelFit,data))
+  results <- c(results, list(summary(modelFit)))
+}
+results[[1]]
+AUCs
 ```
 
 # BAYESIAN ANALYSIS
 
 ```{r}
-
+roc(data$homeOrRehab,predict(modelFit,data))
 ```
 
