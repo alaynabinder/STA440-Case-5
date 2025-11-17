@@ -81,6 +81,9 @@ ggplot(missing_by_site_time,
     axis.text.x = element_text(angle = 30, hjust = 1, size = 8),
     strip.text = element_text(size = 12)
   )
+
+library(mice)
+md.pattern(x,rotate.names = TRUE)
 ```
 
 # DATA CLEANING / IMPUTATION
@@ -177,7 +180,7 @@ completed_list <- mice::complete(imp, action = "all")
 
 # Define the categories exactly as they appear in your data
 fix_rule <- function(df) {
-  df$PreHospNotify[df$EMSvsCar == 1] <- "No"
+  df$PreHospNotify[df$EMSvsCar == 0] <- "No"
   return(df)
 }
 
@@ -263,12 +266,24 @@ pooled_results <- lapply(model_results, pool)
 # FREQUENTIST ANALYSIS
 
 ```{r}
-
+library(pROC)
+results = NULL
+AUCs = NULL
+for (i in 1:5){
+  data <- completed_fixed[[i]]
+  data$homeOrRehab <- if_else(data$homeOrRehab,1,0)
+  modelFit <- glm(factor(homeOrRehab) ~ . - tpaComplic - , data = data, family = "binomial")
+  AUCs <- c(AUCs,auc(data$homeOrRehab,predict(modelFit,data)))
+  plot.roc(data$homeOrRehab,predict(modelFit,data))
+  results <- c(results, list(summary(modelFit)))
+}
+results[[1]]
+AUCs
 ```
 
 # BAYESIAN ANALYSIS
 
 ```{r}
-
+roc(data$homeOrRehab,predict(modelFit,data))
 ```
 
