@@ -1,6 +1,6 @@
 ---
 title: "Analysis"
-output: html_document
+output: pdf_document
 ---
 
 ```{r}
@@ -332,7 +332,7 @@ sensitivity_results[["Age_0_EMS_0_Pre_none"]]
 ```
 
 
-```{r}
+```{r,eval=FALSE}
 model_results <- lapply(sensitivity_age, function(s) {
   with(mice::as.mids(s$data), glm(StrokeOutcome ~ Age + EMSvsCar + PreHospNotify, family=binomial))
 })
@@ -378,7 +378,7 @@ ggplot(age_compare, aes(x = Age, fill = factor(.imp))) +
   theme_minimal()
 ```
 
-```{r}
+```{r,eval=FALSE}
 # EMSvsCar, PreHospNotify
 orig_summary <- x |>
   summarize(
@@ -432,7 +432,7 @@ ggplot(binary_summary_all, aes(x = .imp, y = prop_yes, fill = (.imp == "Original
 
 Now onto EDA for association:
 
-```{r fig.width=18, fig.height=10}
+```{r, fig.width=18, fig.height=10,eval=FALSE}
 # just doing eda with 1st bc distributions roughly the same - obviously we would want to use all for prediction, but more lax in this case
 assoc_df <- eda_df |>
   select(
@@ -510,11 +510,11 @@ AUCs = NULL
 for (i in 1:20){
   data <- completed_fixed[[i]]
   data$homeOrRehab <- if_else(data$homeOrRehab,1,0)
-  modelFit <- glm(factor(homeOrRehab) ~ . - tpaComplic, data = data, family = "binomial")
+  modelFit <- glm(factor(homeOrRehab) ~ ., data = data, family = "binomial")
   AUCs <- c(AUCs,auc(data$homeOrRehab,predict(modelFit,data)))
   results <- c(results, list(summary(modelFit)))
 }
-#arm::binnedplot(fitted(modelFit),residuals(modelFit))
+arm::binnedplot(fitted(modelFit),residuals(modelFit))
 plot.roc(data$homeOrRehab,predict(modelFit,data))
 results[[1]]$coefficients |> 
   as.data.frame() |> 
@@ -525,8 +525,39 @@ data.frame(iter = seq(1,20), AUC = AUCs) |>
 ```
 
 # BAYESIAN ANALYSIS
-
+{{< pagebreak >}}
 ```{r}
+library(rstan)
+data <- data |> 
+  mutate(raceAfricanAmerican = if_else(Race2 == "African American",1,0),
+         raceOther = if_else(Race2 == "Other",1,0),
+         raceCaucasian = if_else(Race2 == "Caucasian",1,0)) |> 
+  select(-Race2)
+Y <- as.integer(data$homeOrRehab)
+X <- model.matrix(~.,data =data[2:13])[,-1]
+X <- X[,-14]
+Ids <- as.numeric(data$siteID)
+n <- length(unique(Ids))
+N <- nrow(X)
+p <- ncol(X)
+stan_data <- list(
+  Y = Y,
+  X = X,
+  Ids = Ids,
+  n = n,
+  N = N,
+  p = p
+)
+compiled_model <- stan_model(file = "logRegRE.stan")
+options(mc.cores = 4)
+fit <- sampling(compiled_model, data = stan_data)
+print(fit, pars = c("alpha", "beta", "theta","tau"), probs = c(0.025, 0.5, 0.975))
 
+library(bayesplot)
+Y_pred <- rstan::extract(fit, pars = "Y_pred")$Y_pred
+ppc_bars(Y, Y_pred[1:100, ])
+ppc_bars_grouped(Y, Y_pred[1:100, ],data$Gender)
+traceplot(fit, pars = c("alpha","beta"))
+mcmc_acf(fit, regex_pars = c("alpha","beta"))
 ```
 
