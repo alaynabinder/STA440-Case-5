@@ -1,0 +1,52 @@
+
+model {
+
+  #### AGE MODEL (hierarchical by site) ####
+  for (i in 1:N) {
+    age[i] ~ dnorm(mu_site[site[i]], tau_age)
+  }
+
+  mu_overall ~ dnorm(0, 1.0E-6)
+  tau_age    ~ dgamma(0.01, 0.01)
+  sigma_age <- 1 / sqrt(tau_age)
+
+  for (s in 1:nsite) {
+    b_site[s] ~ dnorm(0, tau_b)
+    mu_site[s] <- mu_overall + b_site[s]
+  }
+
+  tau_b ~ dgamma(0.01, 0.01)
+  sigma_b <- 1 / sqrt(tau_b)
+
+
+  #### TRANSPORT-NOTIFY MULTINOMIAL ####
+  for (i in 1:N) {
+    tr[i] ~ dcat(pi_tr[site[i],1:K_tr])
+  }
+
+  # Dirichlet prior via Gamma normalization
+  for (s in 1:nsite) {
+
+    for (k in 1:K_tr) {
+      g_tr[s,k] ~ dgamma(1,1)
+    }
+
+    for (k in 1:K_tr) {
+      pi_tr[s,k] <- g_tr[s,k] / sum(g_tr[s,1:K_tr])
+    }
+
+  }
+
+
+  #### RACE MULTINOMIAL ####
+  for (i in 1:N) {
+    race[i] ~ dcat(pi_race[site[i],1:K_race])
+  }
+
+  for (s in 1:nsite) {
+    pi_race[s,1:K_race] ~ ddirch(alpha[1:K_race])
+  }
+
+}
+
+

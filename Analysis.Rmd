@@ -521,6 +521,412 @@ ggplot(assoc_df, aes(x = Level, y = prop_favorable)) +
 ```
 
 
+
+
+
+# MODIFIED IMPUTATION
+```{r}
+library(rjags)
+
+
+strokes$Age[strokes$Age == ""] <- NA
+strokes$EMSvsCar[strokes$EMSvsCar == ""] <- NA
+strokes$PreHospNotify[strokes$PreHospNotify == ""] <- NA
+
+strokes$Race2[strokes$Race2 == "Missing"] <- NA
+strokes$Race2 <- factor(strokes$Race2)
+
+# Create NEW combined variable:
+# 1 = Car (no notification)
+# 2 = EMS w/o notification
+# 3 = EMS w/ notification
+strokes$TransportNotify <- with(
+  strokes,
+  ifelse(EMSvsCar == 0, 1,
+         ifelse(PreHospNotify == 0, 2, 3))
+)
+
+# Convert to numeric categories for JAGS
+strokes$siteID <- factor(strokes$siteID)
+strokes$Race2 <- factor(strokes$Race2)
+
+y_age  <- strokes$Age
+y_tr   <- as.numeric(strokes$TransportNotify)
+y_race <- as.numeric(strokes$Race2)
+site   <- as.numeric(strokes$siteID)
+
+N      <- nrow(strokes)
+nsite  <- length(unique(site))
+K_tr   <- 3     # new Transport/Notify categories
+K_race <- length(levels(strokes$Race2))
+
+
+jags_data <- list(
+  N = N,
+  age = y_age,
+  tr = y_tr,
+  race = y_race,
+  site = site,
+  nsite = nsite,
+  K_tr = K_tr,
+  K_race = K_race,
+  alpha = rep(0.5, K_race)
+)
+inits_list <- list(
+  list(
+    mu_overall = 15,
+    tau_age    = 1,
+    tau_b      = 1,
+    g_tr       = matrix(1, nsite, K_tr),       # stochastic node
+    pi_race    = matrix(1/K_race, nsite, K_race) # stochastic node
+  ),
+  list(
+    mu_overall = 60,
+    tau_age    = 0.5,
+    tau_b      = 2,
+    g_tr       = matrix(0.5, nsite, K_tr),
+    pi_race    = matrix(0.3, nsite, K_race)
+  ),
+  list(
+    mu_overall = 30,
+    tau_age    = 2,
+    tau_b      = 1.5,
+    g_tr       = matrix(0.2, nsite, K_tr),
+    pi_race    = matrix(0.2, nsite, K_race)
+  )
+)
+
+
+inits <- function() {
+  list(
+    mu_overall = 50,
+    tau_age = 1,
+    tau_b = 1
+    # NO age, tr, race here!
+    # pi_race and pi_tr if needed
+  )
+}
+
+params <- c(
+  "age", "tr", "race",      # missing data
+  "mu_overall", "tau_age", "tau_b",  # hyperparameters
+  "pi_tr", "pi_race",       # categorical probabilities
+  "mu_site", "b_site"       # NEW: site-level means and random effects
+)
+
+
+jmod <- jags.model(
+  "jags_impute_model.txt",
+  data = jags_data,
+  inits = inits_list,
+  n.chains = 3,
+  n.adapt = 1000
+)
+
+
+update(jmod, 2000)
+
+
+
+samples <- coda.samples(
+  jmod,
+  variable.names = params,
+  n.iter = 5000
+)
+
+samples
+
+```
+
+```{r}
+# write model to file
+model_string <- "
+model {
+
+  #### AGE MODEL (hierarchical by site) ####
+  for (i in 1:N) {
+    age[i] ~ dnorm(mu_site[site[i]], tau_age)
+  }
+
+  mu_overall ~ dnorm(0, 1.0E-6)
+  tau_age    ~ dgamma(0.01, 0.01)
+  sigma_age <- 1 / sqrt(tau_age)
+
+  for (s in 1:nsite) {
+    b_site[s] ~ dnorm(0, tau_b)
+    mu_site[s] <- mu_overall + b_site[s]
+  }
+
+  tau_b ~ dgamma(0.01, 0.01)
+  sigma_b <- 1 / sqrt(tau_b)
+
+
+  #### TRANSPORT-NOTIFY MULTINOMIAL ####
+  for (i in 1:N) {
+    tr[i] ~ dcat(pi_tr[site[i],1:K_tr])
+  }
+
+  # Dirichlet prior via Gamma normalization
+  for (s in 1:nsite) {
+
+    for (k in 1:K_tr) {
+      g_tr[s,k] ~ dgamma(1,1)
+    }
+
+    for (k in 1:K_tr) {
+      pi_tr[s,k] <- g_tr[s,k] / sum(g_tr[s,1:K_tr])
+    }
+
+  }
+
+
+  #### RACE MULTINOMIAL ####
+  for (i in 1:N) {
+    race[i] ~ dcat(pi_race[site[i],1:K_race])
+  }
+
+  for (s in 1:nsite) {
+    pi_race[s,1:K_race] ~ ddirch(alpha[1:K_race])
+  }
+
+}
+
+"
+
+writeLines(model_string, con = 'jags_impute_model.txt')
+
+```
+
+
+```{r}
+library(coda)
+
+# Suppose you monitored only hyperparameters
+samples_hyper <- samples[, c("mu_overall", "tau_age", "tau_b")]
+
+# Gelman-Rubin diagnostic
+gelman.diag(samples_hyper)
+
+traceplot(samples_mcmc[, c("mu_overall", "tau_age", "tau_b")])
+effectiveSize(samples_mcmc[, c("mu_overall", "tau_age", "tau_b")])
+
+
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# -------------------------------
+# 1. Extract posterior samples
+# -------------------------------
+samples_matrix <- as.matrix(samples)  # combine chains
+samples_df <- as.data.frame(samples_matrix)
+
+# -------------------------------
+# 2. Define prior distributions
+# -------------------------------
+
+# Example for mu_overall ~ N(0, 1e6)
+prior_mu <- function(x) dnorm(x, mean = 0, sd = sqrt(1e6))
+
+# Example for tau_age, tau_b ~ Gamma(0.01, 0.01)
+prior_gamma <- function(x) dgamma(x, shape = 0.01, rate = 0.01)
+
+# -------------------------------
+# 3. Make data frames for ggplot
+# -------------------------------
+
+# mu_overall
+df_mu <- data.frame(
+  x = seq(min(samples_df$mu_overall)-5, max(samples_df$mu_overall)+5, length.out = 500)
+)
+df_mu$prior <- prior_mu(df_mu$x)
+df_mu$type <- "Prior"
+
+df_mu_post <- data.frame(
+  x = samples_df$mu_overall,
+  density = NA,
+  type = "Posterior"
+)
+
+# tau_age
+df_tau <- data.frame(
+  x = seq(0, max(samples_df$tau_age)*1.5, length.out = 500)
+)
+df_tau$prior <- prior_gamma(df_tau$x)
+df_tau$type <- "Prior"
+
+df_tau_post <- data.frame(
+  x = samples_df$tau_age,
+  density = NA,
+  type = "Posterior"
+)
+
+# tau_b
+df_tb <- data.frame(
+  x = seq(0, max(samples_df$tau_b)*1.5, length.out = 500)
+)
+df_tb$prior <- prior_gamma(df_tb$x)
+df_tb$type <- "Prior"
+
+df_tb_post <- data.frame(
+  x = samples_df$tau_b,
+  density = NA,
+  type = "Posterior"
+)
+
+# -------------------------------
+# 4. Plotting
+# -------------------------------
+
+# Function to plot prior vs posterior
+plot_prior_post <- function(df_prior, df_post, title) {
+  ggplot() +
+    geom_line(data = df_prior, aes(x = x, y = prior, color = "Prior"), size = 1) +
+    geom_histogram(data = df_post, aes(x = x, y = ..density.., fill = "Posterior"),
+                   bins = 50, alpha = 0.5, position = "identity") +
+    scale_color_manual("", values = c("Prior" = "blue")) +
+    scale_fill_manual("", values = c("Posterior" = "orange")) +
+    theme_minimal() +
+    labs(title = title, x = "", y = "Density")
+}
+
+# Plot mu_overall
+plot_prior_post(df_mu, df_mu_post, "mu_overall")
+
+# Plot tau_age
+plot_prior_post(df_tau, df_tau_post, "tau_age")
+
+# Plot tau_b
+plot_prior_post(df_tb, df_tb_post, "tau_b")
+
+```
+
+```{r}
+library(coda)
+
+# -------------------------------
+# 1. Convert coda samples to matrix
+# -------------------------------
+samples_matrix <- as.matrix(samples)
+
+# -------------------------------
+# 2. Identify missing indices
+# -------------------------------
+missing_age  <- which(is.na(y_age))
+missing_tr   <- which(is.na(y_tr))
+missing_race <- which(is.na(y_race))
+
+# -------------------------------
+# 3. Function to create one imputed dataset
+# -------------------------------
+impute_dataset <- function(samples_matrix, y_age, y_tr, y_race) {
+  y_age_imp  <- y_age
+  y_tr_imp   <- y_tr
+  y_race_imp <- y_race
+
+  # Impute age (continuous)
+  for (i in missing_age) {
+    varname <- paste0("age[", i, "]")
+    draws <- samples_matrix[, varname]
+    y_age_imp[i] <- sample(draws, 1)
+  }
+
+  # Impute transport-notify (categorical)
+  for (i in missing_tr) {
+    varname <- paste0("tr[", i, "]")
+    draws <- samples_matrix[, varname]
+    tab <- table(draws)
+    # Random draw from posterior probabilities
+    y_tr_imp[i] <- as.numeric(sample(names(tab), 1, prob = tab))
+  }
+
+  # Impute race (categorical)
+  for (i in missing_race) {
+    varname <- paste0("race[", i, "]")
+    draws <- samples_matrix[, varname]
+    tab <- table(draws)
+    y_race_imp[i] <- as.numeric(sample(names(tab), 1, prob = tab))
+  }
+
+  # Create completed dataset
+  df <- strokes
+  df$Age <- y_age_imp
+  df$TransportNotify <- y_tr_imp
+  df$Race2 <- factor(y_race_imp, levels = 1:K_race)
+  return(df)
+}
+
+# -------------------------------
+# 4. Generate multiple imputed datasets
+# -------------------------------
+m <- 5  # number of imputed datasets
+imputed_list <- vector("list", m)
+
+set.seed(123)  # reproducible
+for (j in 1:m) {
+  imputed_list[[j]] <- impute_dataset(samples_matrix, y_age, y_tr, y_race)
+}
+
+# Now imputed_list[[1]], imputed_list[[2]], ... are your datasets
+
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# 1. Extract posterior means for mu_site
+# Assuming mu_site[s] is monitored in your JAGS model
+if(!"mu_site[1]" %in% colnames(samples_matrix)) {
+  stop("You need to monitor mu_site[s] in your JAGS model")
+}
+
+mu_site_post <- samples_matrix[, grep("^mu_site\\[", colnames(samples_matrix))]
+mu_site_mean <- colMeans(mu_site_post)  # posterior mean per site
+
+# 2. Compute residuals: observed age - posterior mean per site
+residuals <- y_age - mu_site_mean[site]
+
+# 3. Residual normality check
+ggplot(data.frame(residuals = residuals), aes(sample = residuals)) +
+  stat_qq() +
+  stat_qq_line(color = "red") +
+  ggtitle("QQ-Plot of Age Residuals") +
+  theme_minimal()
+
+# 4. Histogram of residuals
+ggplot(data.frame(residuals = residuals), aes(x = residuals)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "skyblue", alpha = 0.6) +
+  geom_density(color = "red") +
+  ggtitle("Histogram of Age Residuals") +
+  theme_minimal()
+
+# 5. Check variance across sites
+residuals_df <- data.frame(residuals = residuals, site = factor(site))
+ggplot(residuals_df, aes(x = site, y = residuals)) +
+  geom_boxplot(fill = "lightgreen", alpha = 0.6) +
+  ggtitle("Residuals by Site") +
+  ylab("Age residuals") +
+  theme_minimal()
+
+# 6. Inspect site-level random effects
+b_site_post <- samples_matrix[, grep("^b_site\\[", colnames(samples_matrix))]
+b_site_mean <- colMeans(b_site_post)
+
+ggplot(data.frame(b_site = b_site_mean, site = factor(1:nsite)),
+       aes(x = site, y = b_site)) +
+  geom_point(size = 3, color = "blue") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  ggtitle("Posterior Mean of Site-level Random Effects") +
+  ylab("b_site") +
+  theme_minimal()
+
+```
+
+
 # FREQUENTIST ANALYSIS
 
 ```{r}
