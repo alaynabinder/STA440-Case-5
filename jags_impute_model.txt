@@ -1,44 +1,48 @@
 
 model {
 
-  #### AGE MODEL (hierarchical by site) ####
+  #### AGE MODEL (regression + site random effect) ####
   for (i in 1:N) {
-    age[i] ~ dnorm(mu_site[site[i]], tau_age)
+    age[i] ~ dnorm(mu_age[i], tau_age)
+    mu_age[i] <- beta0 + inprod(beta[], X[i,]) + b_site[site[i]]
   }
-
-  mu_overall ~ dnorm(0, 1.0E-6)
-  tau_age    ~ dgamma(0.01, 0.01)
-  sigma_age <- 1 / sqrt(tau_age)
+  tau_age ~ dgamma(0.01,0.01)
+  sigma_age <- 1/sqrt(tau_age)
 
   for (s in 1:nsite) {
     b_site[s] ~ dnorm(0, tau_b)
-    mu_site[s] <- mu_overall + b_site[s]
   }
+  tau_b ~ dgamma(0.01,0.01)
+  sigma_b <- 1/sqrt(tau_b)
 
-  tau_b ~ dgamma(0.01, 0.01)
-  sigma_b <- 1 / sqrt(tau_b)
+  for (j in 1:NCOV) {
+    beta[j] ~ dnorm(0,0.001)
+  }
+  beta0 ~ dnorm(0,0.001)
 
-
-  #### TRANSPORT-NOTIFY MULTINOMIAL ####
+  #### TRANSPORT-NOTIFY MODEL (multinomial logistic regression + site random effects) ####
   for (i in 1:N) {
-    tr[i] ~ dcat(pi_tr[site[i],1:K_tr])
+    tr[i] ~ dcat(pi_tr[i,1:K_tr])
+    for (k in 1:K_tr) {
+      logit(pi_tr[i,k]) <- alpha_tr[k] + inprod(gamma[k,], X[i,]) + u_site[site[i],k]
+    }
   }
 
-  # Dirichlet prior via Gamma normalization
   for (s in 1:nsite) {
-
     for (k in 1:K_tr) {
-      g_tr[s,k] ~ dgamma(1,1)
+      u_site[s,k] ~ dnorm(0, tau_u)
     }
+  }
+  tau_u ~ dgamma(0.01,0.01)
 
-    for (k in 1:K_tr) {
-      pi_tr[s,k] <- g_tr[s,k] / sum(g_tr[s,1:K_tr])
+  for (k in 1:K_tr) {
+    for (j in 1:NCOV) {
+      gamma[k,j] ~ dnorm(0,0.001)
     }
-
+    alpha_tr[k] ~ dnorm(0,0.001)
   }
 
-
-  #### RACE MULTINOMIAL ####
+  #### RACE MODEL (site-only) ####
   for (i in 1:N) {
     race[i] ~ dcat(pi_race[site[i],1:K_race])
   }
@@ -46,7 +50,5 @@ model {
   for (s in 1:nsite) {
     pi_race[s,1:K_race] ~ ddirch(alpha[1:K_race])
   }
-
 }
-
 
