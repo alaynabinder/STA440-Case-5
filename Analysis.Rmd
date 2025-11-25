@@ -671,6 +671,9 @@ samp <- saveRDS(samples, "samples")
 
 ```
 ```{r}
+
+samples <- readRDS("samples")
+
 library(coda)
 
 # --- Extract hyperparameters from the posterior ---
