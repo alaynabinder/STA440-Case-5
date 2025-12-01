@@ -1,0 +1,112 @@
+model {
+
+  ##############################
+  #### AGE MODEL
+  ##############################
+  for (i in 1:N) {
+    age[i] ~ dnorm(mu_age[i], tau_age)
+    mu_age[i] <- beta0 + inprod(beta[], X[i,]) + b_site[site[i]]
+  }
+
+  tau_age ~ dgamma(0.01, 0.01)
+  sigma_age <- 1 / sqrt(tau_age)
+
+  for (s in 1:nsite) {
+    b_site[s] ~ dnorm(0, tau_b)
+  }
+
+  tau_b ~ dgamma(0.01, 0.01)
+  sigma_b <- 1 / sqrt(tau_b)
+
+  for (j in 1:NCOV) {
+    beta[j] ~ dnorm(0, 0.001)
+  }
+  beta0 ~ dnorm(0, 0.001)
+
+
+
+  ##############################
+  #### TRANSPORT-NOTIFY MODEL
+  #### (Multinomial logistic + softmax)
+  ##############################
+
+  # Likelihood
+  for (i in 1:N) {
+
+    tr[i] ~ dcat(pi_tr[i,1:K_tr])
+
+    # Linear predictors for each category
+    for (k in 1:K_tr) {
+      eta_tr[i,k] <- alpha_tr[k] +
+                     inprod(gamma[k,], X[i,]) +
+                     u_site[site[i],k]
+    }
+
+    # Softmax
+    for (k in 1:K_tr) {
+      pi_tr[i,k] <- exp(eta_tr[i,k]) / sum(exp(eta_tr[i,1:K_tr]))
+    }
+  }
+
+  # Priors
+  tau_u ~ dgamma(0.01, 0.01)
+
+  for (s in 1:nsite) {
+    for (k in 1:(K_tr - 1)) {       # last category fixed for identifiability
+      u_site[s,k] ~ dnorm(0, tau_u)
+    }
+    u_site[s,K_tr] <- 0
+  }
+
+  for (k in 1:(K_tr - 1)) {
+    for (j in 1:NCOV) {
+      gamma[k,j] ~ dnorm(0, 0.001)
+    }
+    alpha_tr[k] ~ dnorm(0, 0.001)
+  }
+
+  # Identifiability constraints for baseline category
+  for (j in 1:NCOV) {
+    gamma[K_tr,j] <- 0
+  }
+  alpha_tr[K_tr] <- 0
+
+
+
+  ##############################
+  #### RACE MODEL (Dirichlet)
+  ##############################
+  for (i in 1:N) {
+    race[i] ~ dcat(pi_race[site[i],1:K_race])
+  }
+
+  for (s in 1:nsite) {
+    pi_race[s,1:K_race] ~ ddirch(alpha_race[1:K_race])
+  }
+
+
+
+  ##############################
+  #### LOGISTIC REGRESSION
+  #### (Binary outcome Y)
+  ##############################
+  for (i in 1:N) {
+    Y[i] ~ dbern(p[i])
+    logit(p[i]) <- theta0 + inprod(theta[], X[i,]) + v_site[site[i]]
+  }
+
+  # Priors
+  theta0 ~ dnorm(0, 0.001)
+
+  for (j in 1:NCOV) {
+    theta[j] ~ dnorm(0, 0.001)
+  }
+
+  for (s in 1:nsite) {
+    v_site[s] ~ dnorm(0, tau_v)
+  }
+
+  tau_v ~ dgamma(0.01, 0.01)
+  sigma_v <- 1 / sqrt(tau_v)
+
+}

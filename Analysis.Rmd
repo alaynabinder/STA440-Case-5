@@ -1025,3 +1025,28 @@ traceplot(fit, pars = c("alpha","beta"))
 mcmc_acf(fit, regex_pars = c("alpha","beta"))
 ```
 
+```{r}
+Y <- as.integer(strokes$homeOrRehab)
+#strokes <- strokes |> 
+#  select(-EMSvsCar,-PreHospNotify) 
+strokes$Age[is.na(strokes$Age)] <- -99
+strokes$Race2 <- as.character(strokes$Race2)
+strokes$Race2[is.na(strokes$Race2)] <- "XMissing"
+strokes$Race2 <- as.factor(strokes$Race2)
+strokes$TransportNotify[is.na(strokes$TransportNotify)] <- -99
+X <- model.matrix(~.,data =strokes[2:10])[,-1]
+X <- X[,-14]
+Ids <- as.numeric(data$siteID)
+n <- length(unique(Ids))
+N <- nrow(X)
+p <- ncol(X)
+stan_data <- list(
+  Y = Y,
+  X = X,
+  Ids = Ids,
+  n = n,
+  N = N,
+  p = p
+)
+```
+

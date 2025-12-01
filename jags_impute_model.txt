@@ -50,5 +50,22 @@ model {
   for (s in 1:nsite) {
     pi_race[s,1:K_race] ~ ddirch(alpha[1:K_race])
   }
+  #### LOGISTIC REGRESSION MODEL (binary outcome) ####
+for (i in 1:N) {
+    Y[i] ~ dbern(p[i])
+    logit(p[i]) <- theta0 + inprod(theta[], X[i,]) + v_site[site[i]]
+}
+
+# Priors
+for (j in 1:NCOV) {
+    theta[j] ~ dnorm(0, 0.001)
+}
+theta0 ~ dnorm(0, 0.001)
+
+for (s in 1:nsite) {
+    v_site[s] ~ dnorm(0, tau_v)
+}
+tau_v ~ dgamma(0.01, 0.01)
+sigma_v <- 1/sqrt(tau_v)
 }
 
