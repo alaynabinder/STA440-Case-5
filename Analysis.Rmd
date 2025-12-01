@@ -539,7 +539,10 @@ strokes$EMSvsCar[strokes$EMSvsCar == ""] <- NA
 strokes$PreHospNotify[strokes$PreHospNotify == ""] <- NA
 strokes$Race2[strokes$Race2 == "Missing"] <- NA
 strokes$Race2 <- factor(strokes$Race2)
-
+strokes <- strokes |> 
+  mutate(Time2 = case_when(Time2 == "Y1Q1" | Time2 == "Y1Q1" ~ 1,
+                           Time2 == "Y2Q3" | Time2 == "Y2Q4" ~ 3,
+                           TRUE ~ 2))
 # Create TransportNotify variable
 strokes$TransportNotify <- with(
   strokes,
@@ -975,7 +978,7 @@ results = NULL
 AUCs = NULL
 test <- readRDS("imputed_data")
 for (i in 1:20){
-  data <- completed_fixed[[i]]
+  data <- test[[i]]
   data$homeOrRehab <- if_else(data$homeOrRehab,1,0)
   modelFit <- glm(factor(homeOrRehab) ~ ., data = data, family = "binomial")
   AUCs <- c(AUCs,auc(data$homeOrRehab,predict(modelFit,data)))
