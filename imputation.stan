@@ -4,11 +4,10 @@ data {
   int<lower = 1> p;                // number of predictors
 
   // Missing-data bookkeeping
-  int<lower = 0> N_miss;           // number of missing X entries
+  int<lower = 0> N_miss;    
   int<lower = 1, upper = N> miss_row[N_miss];
   int<lower = 1, upper = p> miss_col[N_miss];
-
-  matrix[N, p] X_obs;              // matrix with observed values; missing positions unused
+  matrix[N, p] X_obs;          
   int<lower=0,upper=1> is_missing[N, p];
 
   int<lower=0,upper=1> Y[N];       // binary outcome
