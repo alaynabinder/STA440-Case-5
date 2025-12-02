@@ -540,7 +540,7 @@ strokes$PreHospNotify[strokes$PreHospNotify == ""] <- NA
 strokes$Race2[strokes$Race2 == "Missing"] <- NA
 strokes$Race2 <- factor(strokes$Race2)
 strokes <- strokes |> 
-  mutate(Time2 = case_when(Time2 == "Y1Q1" | Time2 == "Y1Q1" ~ 1,
+  mutate(Time2 = case_when(Time2 == "Y1Q1" | Time2 == "Y1Q2" ~ 1,
                            Time2 == "Y2Q3" | Time2 == "Y2Q4" ~ 3,
                            TRUE ~ 2))
 # Create TransportNotify variable
@@ -649,7 +649,7 @@ writeLines(model_string, con = "jags_impute_model.txt")
 inits_list <- list(
   list(beta0=50, beta=rep(0,NCOV), tau_age=1, tau_b=1,
        u_site=matrix(0,nrow=jags_data$nsite,ncol=jags_data$K_tr),
-       gamma=matrix(0,jags_data$K_tr,NCOV), alpha_tr=rep(0,jags_data$K_tr),
+       gamma=matrix(0,jags_data$K_tr,NCOV), alpha_tr=rep(0,jags_data$K_tr)
        ),
   list(beta0=40, beta=rep(0,NCOV), tau_age=1, tau_b=50,
        u_site=matrix(0,nrow=jags_data$nsite,ncol=jags_data$K_tr),
@@ -670,7 +670,7 @@ update(jmod, 2000)
 samples <- coda.samples(jmod, variable.names=params, n.iter=20000)
 
 # --- Step 8: Inspect samples ---
-samples
+# samples
 
 samp <- saveRDS(samples, "samples")
 
@@ -854,10 +854,10 @@ for (j in 1:m) {
   )
 }
 
-savedRDS(imputed_datasets, "imputed_data")
+saveRDS(imputed_datasets, "imputed_data")
 ```
 
-`
+
 
 
 
@@ -1004,7 +1004,7 @@ n_chains <- 2
 for (i in 1:20){
 data <- dataImputed[[i]]
 data <- data |> 
-  mutate(Time2 = case_when(Time2 == "Y1Q1" | Time2 == "Y1Q1" ~ 1,
+  mutate(Time2 = case_when(Time2 == "Y1Q1" | Time2 == "Y1Q2" ~ 1,
                            Time2 == "Y2Q3" | Time2 == "Y2Q4" ~ 3,
                            TRUE ~ 2),
          Time2 = as.factor(Time2)) |> 
