@@ -1,0 +1,91 @@
+---
+title: "Results"
+output: html_document
+---
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(purrr)
+library(tibble)
+library(stringr)
+library(forcats)
+
+bet_mat <- readRDS("betas.RDS")
+
+data_for_stan <- strokes |>
+  mutate(
+    Time2 = case_when(Time2 == "Y1Q1" | Time2 == "Y1Q2" ~ 1,
+                      Time2 == "Y2Q3" | Time2 == "Y2Q4" ~ 3,
+                      TRUE ~ 2),
+    Time2 = as.factor(Time2)
+  ) %>%
+  { . -> tmp
+    cols_to_drop <- intersect(c("Race2_num", "EMSvsCar", "PreHospNotify"), names(tmp))
+    tmp %>% select(-all_of(cols_to_drop))
+  }
+
+X_full <- model.matrix(~ ., data = data_for_stan[ , 2:10 ])
+# X_full<- model.matrix(~ ., data = data_for_stan)[ , -1]
+X_full <- X_full[, -1, drop = FALSE]
+if(ncol(X_full) >= 9) X <- X_full[ , -9, drop = FALSE] else X <- X_full
+
+# ---- auto-detect metadata columns in bet_mat ----
+detect_meta_cols <- function(mat, max_unique_thresh = 200) {
+  nc <- ncol(mat)
+  is_intish <- function(col) {
+    col <- as.numeric(col)
+    all(abs(col - floor(col)) < 1e-8, na.rm = TRUE) && (length(unique(col[!is.na(col)])) <= max_unique_thresh)
+  }
+  meta_count <- 0
+  for(i in seq_len(nc)) {
+    if(is_intish(mat[, i])) meta_count <- meta_count + 1 else break
+  }
+  meta_count
+}
+
+meta_count <- detect_meta_cols(bet_mat, max_unique_thresh = 500)
+
+n_params_bet <- ncol(bet_mat) - meta_count
+
+# ---- Map bet columns to X column names ----
+param_cols_idx <- (meta_count + 1):ncol(bet_mat)
+param_names <- colnames(X)
+if(is.null(param_names) || any(param_names == "")) {
+  param_names <- ifelse(param_names == "" | is.na(param_names), paste0("V", seq_along(param_names)), param_names)
+}
+mapping <- tibble(param_col = param_cols_idx, param_label = paste0("param", seq_along(param_cols_idx)), variable = param_names)
+
+# ---- Summarize posterior draws and compute ORs ----
+summaries <- map_dfr(seq_along(param_cols_idx), function(k) {
+  j <- param_cols_idx[k]
+  draws <- as.numeric(bet_mat[, j])
+  draws <- draws[!is.na(draws)]
+  tibble(
+    param = paste0("param", k),
+    col_index = j,
+    variable = mapping$variable[k],
+    median = median(draws),
+    mean = mean(draws),
+    lwr = quantile(draws, 0.025),
+    upr = quantile(draws, 0.975),
+    n_draws = length(draws)
+  )
+}) |>
+  mutate(OR = exp(median), OR_lwr = exp(lwr), OR_upr = exp(upr))
+
+print(summaries)
+
+# ---- Forest plot of Odds Ratios (labeled) ----
+p_or <- ggplot(summaries, aes(x = OR, y = fct_reorder(variable, median))) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = OR_lwr, xmax = OR_upr), height = 0.2) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey40") +
+  labs(title = "Posterior Odds Ratios (Median, 95% CrI)",
+       x = "Odds Ratio (Median) with 95% CrI",
+       y = "") +
+  theme_minimal(base_size = 12)
+
+print(p_or)
+```
+
