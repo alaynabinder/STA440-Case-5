@@ -525,7 +525,440 @@ ggplot(assoc_df, aes(x = Level, y = prop_favorable)) +
 ```
 
 
+# IMPUTATION + BAYESIAN COMBINED MODEL
 
+```{r}
+library(dplyr)
+library(rjags)
+library(coda)
+
+# ----------------------------
+# 1. Data Wrangling & Baselines
+# ----------------------------
+strokes$Age[strokes$Age == ""] <- NA
+strokes$EMSvsCar[strokes$EMSvsCar == ""] <- NA
+strokes$PreHospNotify[strokes$PreHospNotify == ""] <- NA
+strokes$Race2[strokes$Race2 == "Missing"] <- NA
+
+# Race baseline = "Other"
+strokes$Race2 <- factor(strokes$Race2, levels = c("Caucasian", "African American", "Other"))
+strokes$Race2 <- relevel(strokes$Race2, ref = "Other")
+
+# TransportNotify baseline = "Other"
+strokes$TransportNotify <- factor(case_when(
+  strokes$EMSvsCar == "1" & strokes$PreHospNotify == "Yes" ~ "Yes",
+  strokes$EMSvsCar == "1" & strokes$PreHospNotify == "No" ~ "No",
+  TRUE ~ "Other"
+), levels = c("Yes", "No", "Other"))
+strokes$TransportNotify <- relevel(strokes$TransportNotify, ref = "Other")
+
+# Time2 baseline = "1"
+strokes$Time2 <- factor(case_when(
+  strokes$Time2 %in% c("Y1Q1", "Y1Q2") ~ "1",
+  strokes$Time2 %in% c("Y2Q3", "Y2Q4") ~ "3",
+  TRUE ~ "2"
+), levels = c("1","2","3"))
+strokes$Time2 <- relevel(strokes$Time2, ref = "1")
+
+# Other covariates
+strokes$homeOrRehab <- as.integer(strokes$homeOrRehab)
+strokes$siteID <- as.numeric(factor(strokes$siteID))
+
+# Drop unnecessary vars
+strokes <- strokes %>% select(-PreHospNotify, -EMSvsCar)
+
+# ----------------------------
+# 1. Prepare data
+# ----------------------------
+
+# Gender baseline = "Male"
+strokes$Gender <- factor(strokes$Gender, levels = c("Male","Female"))
+strokes$Gender <- relevel(strokes$Gender, ref = "Male")
+
+# Race, TransportNotify, Time2 as factors with explicit baselines
+strokes$Race2 <- factor(strokes$Race2, levels = c("Caucasian","African American","Other"))
+strokes$Race2 <- relevel(strokes$Race2, ref = "Caucasian")
+
+strokes$TransportNotify <- factor(strokes$TransportNotify, levels = c("Yes","No","Other"))
+strokes$TransportNotify <- relevel(strokes$TransportNotify, ref = "Yes")
+
+strokes$Time2 <- factor(strokes$Time2, levels = c("1","2","3"))
+strokes$Time2 <- relevel(strokes$Time2, ref = "1")
+
+# ----------------------------
+# 2. Build covariate matrix X
+# ----------------------------
+exclude_vars <- c("Age","Race2","TransportNotify","Time2","siteID","homeOrRehab")
+covariate_names <- setdiff(names(strokes), exclude_vars)
+
+# Ensure Gender is included
+if(!"Gender" %in% covariate_names) covariate_names <- c(covariate_names, "Gender")
+
+# Use treatment contrasts, keep intercept for baseline
+X_df <- model.matrix(~ ., data = strokes[, covariate_names, drop=FALSE],
+                     contrasts.arg = lapply(strokes[, covariate_names, drop=FALSE],
+                                            function(x) if(is.factor(x)) "contr.treatment" else NULL))
+X_df[is.na(X_df)] <- 0
+X <- as.matrix(X_df)
+NCOV <- ncol(X)
+cov_names <- colnames(X)
+
+# ----------------------------
+# 3. Categorical indices for JAGS
+# ----------------------------
+race_idx <- as.numeric(strokes$Race2)
+tr_idx <- as.numeric(strokes$TransportNotify)
+time_idx <- as.numeric(strokes$Time2)
+site_idx <- strokes$siteID
+
+N <- nrow(strokes)
+nsite <- length(unique(site_idx))
+K_race <- length(levels(strokes$Race2))
+K_tr <- length(levels(strokes$TransportNotify))
+K_time <- length(levels(strokes$Time2))
+
+# ----------------------------
+# 4. JAGS data
+# ----------------------------
+jags_data <- list(
+  N = N,
+  X = X,
+  NCOV = NCOV,
+  site = site_idx,
+  nsite = nsite,
+  time = time_idx,
+  K_time = K_time,
+  Y = strokes$homeOrRehab,
+  race = race_idx,
+  tr = tr_idx,
+  K_race = K_race,
+  K_tr = K_tr,
+  age = as.numeric(strokes$Age)
+)
+
+# ----------------------------
+# 5. JAGS model string
+# ----------------------------
+model_string <- "
+model {
+  # Age imputation
+  for(i in 1:N){
+    age[i] ~ dnorm(mu_age[i], tau_age)
+    mu_age[i] <- beta0_age + b_site_age[site[i]]
+  }
+  beta0_age ~ dnorm(0,0.001)
+  tau_age ~ dgamma(0.01,0.01)
+  for(s in 1:nsite){ b_site_age[s] ~ dnorm(0, tau_b_age) }
+  tau_b_age ~ dgamma(0.01,0.01)
+
+  # Race imputation
+  pi_race[1:K_race] ~ ddirch(rep(1,K_race))
+  for(i in 1:N){ race[i] ~ dcat(pi_race[1:K_race]) }
+  beta_race[1] <- 0
+  for(k in 2:K_race){ beta_race[k] ~ dnorm(0,0.001) }
+
+  # TransportNotify imputation
+  pi_tr[1:K_tr] ~ ddirch(rep(1,K_tr))
+  for(i in 1:N){ tr[i] ~ dcat(pi_tr[1:K_tr]) }
+  beta_tr[1] <- 0
+  for(k in 2:K_tr){ beta_tr[k] ~ dnorm(0,0.001) }
+
+  # Time effects
+  beta_time[1] <- 0
+  for(k in 2:K_time){ beta_time[k] ~ dnorm(0,0.001) }
+
+  # Logistic regression
+  for(i in 1:N){
+    Y[i] ~ dbern(p[i])
+    logit(p[i]) <- beta0 + inprod(beta[], X[i,]) +
+                   beta_age*age[i] +
+                   beta_race[race[i]] +
+                   beta_tr[tr[i]] +
+                   beta_time[time[i]] +
+                   b_site_home[site[i]]
+  }
+
+  # Priors
+  beta0 ~ dnorm(0,0.001)
+  for(j in 1:NCOV){ beta[j] ~ dnorm(0,0.001) }
+  beta_age ~ dnorm(0,0.001)
+  for(s in 1:nsite){ b_site_home[s] ~ dnorm(0, tau_home) }
+  tau_home ~ dgamma(0.01,0.01)
+}
+"
+writeLines(model_string, "model_impute_all_fixed_gender.txt")
+
+# ----------------------------
+# 6. Initial values
+# ----------------------------
+inits_fn <- function(){
+  inits <- list()
+  inits$beta0 <- 0
+  inits$beta <- rep(0, NCOV)
+  inits$beta_age <- 0
+  inits$b_site_home <- rep(0, nsite)
+  inits$b_site_age <- rep(0, nsite)
+  inits$tau_home <- 1
+  inits$tau_age <- 1
+  inits$tau_b_age <- 1
+
+  # Age missing
+  age_init <- rep(NA_real_, N)
+  missing_age <- which(is.na(jags_data$age))
+  if(length(missing_age) > 0) age_init[missing_age] <- mean(strokes$Age, na.rm = TRUE)
+  inits$age <- age_init
+
+  # Race missing
+  race_init <- rep(NA_integer_, N)
+  missing_race <- which(is.na(jags_data$race))
+  if(length(missing_race) > 0) race_init[missing_race] <- sample(1:K_race, length(missing_race), replace = TRUE)
+  inits$race <- race_init
+
+  # TransportNotify missing
+  tr_init <- rep(NA_integer_, N)
+  missing_tr <- which(is.na(jags_data$tr))
+  if(length(missing_tr) > 0) tr_init[missing_tr] <- sample(1:K_tr, length(missing_tr), replace = TRUE)
+  inits$tr <- tr_init
+
+  # Dirichlet
+  inits$pi_race <- rep(1/K_race, K_race)
+  inits$pi_tr <- rep(1/K_tr, K_tr)
+  return(inits)
+}
+inits_list <- list(inits_fn(), inits_fn(), inits_fn())
+
+# ----------------------------
+# 7. Run JAGS
+# ----------------------------
+jmod <- jags.model(file = "model_impute_all_fixed_gender.txt",
+                   data = jags_data,
+                   inits = inits_list,
+                   n.chains = 3,
+                   n.adapt = 1000)
+update(jmod, 2000)
+
+monitor_vars <- c("beta0","beta","beta_age","beta_race","beta_tr","beta_time","b_site_home")
+samples <- coda.samples(jmod, variable.names = monitor_vars, n.iter = 20000)
+
+# ----------------------------
+# 8. Extract coefficients and credible intervals
+# ----------------------------
+samples_matrix <- as.matrix(samples)
+
+# Base names
+coef_names <- c("Intercept", colnames(X), "Age")
+
+# Add categorical non-baseline levels
+factor_list <- list(
+  Race2 = levels(strokes$Race2),
+  TransportNotify = levels(strokes$TransportNotify),
+  Time2 = levels(strokes$Time2)
+)
+for(f in names(factor_list)){
+  levs <- factor_list[[f]]
+  if(length(levs) > 1){
+    for(k in 2:length(levs)){
+      coef_names <- c(coef_names, paste0(f, "_", levs[k]))
+    }
+  }
+}
+
+# Map JAGS columns
+param_order <- c("beta0", paste0("beta[", 1:NCOV, "]"), "beta_age")
+if(K_race > 1) param_order <- c(param_order, paste0("beta_race[", 2:K_race, "]"))
+if(K_tr > 1) param_order <- c(param_order, paste0("beta_tr[", 2:K_tr, "]"))
+if(K_time > 1) param_order <- c(param_order, paste0("beta_time[", 2:K_time, "]"))
+
+coef_samples <- samples_matrix[, param_order, drop=FALSE]
+
+# Posterior summaries
+summary_df <- data.frame(
+  Variable = coef_names,
+  Mean = apply(coef_samples, 2, mean),
+  Lower95 = apply(coef_samples, 2, quantile, probs=0.025),
+  Upper95 = apply(coef_samples, 2, quantile, probs=0.975)
+) %>%
+  mutate(across(2:4, round, 3))
+
+print(summary_df)
+
+```
+
+```{r}
+# Focused diagnostics: Rhat, ESS, ACF (single faceted plot), Trace grid, Pairs, Caterpillar, Posterior table
+
+# ---------- helpers ----------
+as_matrix_draws <- function(mcl) as.matrix(do.call(rbind, lapply(mcl, as.matrix)))
+safe_gelman <- function(mcl){
+  out <- tryCatch(gelman.diag(mcl, multivariate = FALSE),
+                  error = function(e) { message("gelman.diag error: ", e$message); return(NULL) })
+  return(out)
+}
+
+# ---------- basic info ----------
+samples_mat <- as_matrix_draws(samples)
+param_names <- colnames(samples_mat)
+n_params <- length(param_names)
+cat("Chains:", length(samples), " Total draws (rows):", nrow(samples_mat), " Parameters:", n_params, "\n\n")
+
+# ---------- 1) R-hat ----------
+gel <- safe_gelman(samples)
+if(!is.null(gel)){
+  # older coda may name columns slightly differently; handle both
+  psrf <- as.data.frame(gel$psrf)
+  colnames(psrf) <- make.names(colnames(psrf))
+  rhat_df <- data.frame(Parameter = rownames(psrf),
+                        Rhat = psrf[[1]],
+                        Rhat_upper = if(ncol(psrf) >= 2) psrf[[2]] else NA)
+  rhat_df <- rhat_df %>% arrange(desc(Rhat))
+  cat("Top R-hat (largest first):\n")
+  print(head(rhat_df, 30))
+} else {
+  rhat_df <- data.frame(Parameter = character(0), Rhat = numeric(0), Rhat_upper = numeric(0))
+  message("R-hat skipped (gelman.diag failed).")
+}
+
+# ---------- 2) ESS ----------
+ess_vals <- effectiveSize(samples)
+ess_df <- data.frame(Parameter = names(ess_vals), ESS = as.numeric(ess_vals))
+ess_df <- ess_df %>% arrange(ESS)
+cat("\nLowest ESS (showing up to 30):\n")
+print(head(ess_df, 30))
+
+# helper: choose parameters to plot (prioritize problematic ones)
+pick_params_for_plots <- function(all_params, max_panels = 36){
+  if(length(all_params) <= max_panels) return(all_params)
+  # pick union of lowest ESS and highest Rhat
+  low_ess <- ess_df$Parameter[1:min(nrow(ess_df), max_panels)]
+  high_rhat <- if(nrow(rhat_df)>0) rhat_df$Parameter[1:min(nrow(rhat_df), max_panels)] else character(0)
+  sel <- unique(c(low_ess, high_rhat))
+  if(length(sel) > max_panels) sel <- sel[1:max_panels]
+  return(sel)
+}
+
+# ---------- 3) ACF faceted plot (single multi-panel ggplot) ----------
+# compute acf (lags 0..30) on combined draws for each parameter (or selection)
+max_lag <- 30
+acf_candidates <- pick_params_for_plots(param_names, max_panels = 36)  # up to 36 panels
+cat("\nACF panels will show", length(acf_candidates), "parameters (selected for readability).\n")
+
+acf_list <- lapply(acf_candidates, function(p){
+  vals <- samples_mat[, p]
+  # use stats::acf on the combined series (no plotting)
+  a <- acf(vals, plot = FALSE, lag.max = max_lag)
+  data.frame(Parameter = p,
+             Lag = as.integer(a$lag[,1,1]),
+             ACF = as.numeric(a$acf[,1,1]),
+             stringsAsFactors = FALSE)
+})
+acf_df <- bind_rows(acf_list)
+# remove lag 0 if you prefer (keep if you want correlation at lag0)
+acf_df <- acf_df %>% filter(Lag > 0)
+
+# make faceted bar chart
+p_acf <- ggplot(acf_df, aes(x = Lag, y = ACF)) +
+  geom_col() +
+  geom_hline(yintercept = 0, color = "grey40") +
+  facet_wrap(~ Parameter, scales = "free_y", ncol = 6) +
+  labs(title = paste0("ACF (lags 1-", max_lag, ") — faceted panels (", length(acf_candidates), " params)"),
+       x = "Lag", y = "ACF") +
+  theme_minimal(base_size = 10) +
+  theme(strip.text = element_text(size = 8))
+print(p_acf)
+
+# ---------- 4) Traceplots (chains overlaid) in grid (ggplot facets) ----------
+# We'll build a long dataframe with chain and iteration info
+mcmc_long <- bind_rows(lapply(seq_along(samples), function(ci){
+  mat <- as.matrix(samples[[ci]])
+  df <- as.data.frame(mat)
+  df$iter <- seq_len(nrow(df))
+  df$chain <- paste0("chain", ci)
+  # pivot longer
+  df_long <- pivot_longer(df, cols = -c(iter, chain), names_to = "Parameter", values_to = "Value")
+  return(df_long)
+}), .id = NULL)
+
+# choose params for traces (<=24 preferred to keep readable)
+trace_candidates <- pick_params_for_plots(param_names, max_panels = 24)
+cat("Traceplot panels will show", length(trace_candidates), "parameters (selected for readability).\n")
+
+trace_df <- mcmc_long %>% filter(Parameter %in% trace_candidates)
+
+p_trace <- ggplot(trace_df, aes(x = iter, y = Value, color = chain)) +
+  geom_line(alpha = 0.6) +
+  facet_wrap(~ Parameter, scales = "free_y", ncol = 3) +
+  labs(title = paste0("Traceplots (chains overlaid) — faceted, ", length(trace_candidates), " params"),
+       x = "Iteration", y = "Value") +
+  theme_minimal(base_size = 10) +
+  theme(legend.position = "bottom", strip.text = element_text(size = 9))
+print(p_trace)
+
+# ---------- 5) Pairs plot (small selected set) ----------
+pairs_candidates <- c("beta0",
+                      paste0("beta[", 1:min(4, NCOV), "]"),
+                      "beta_age",
+                      paste0("beta_race[", 2:min(K_race, 2), "]"),
+                      paste0("beta_tr[", 2:min(K_tr, 2), "]"),
+                      paste0("beta_time[", 2:min(K_time, 2), "]"))
+pairs_params <- intersect(param_names, pairs_candidates)
+if(length(pairs_params) >= 2){
+  cat("\nPairs plot for selected params:\n")
+  print(pairs_params)
+  pairs(as.matrix(samples)[, pairs_params], main = "Pairs: selected parameters")
+} else {
+  message("Not enough selected parameters available for pairs plot.")
+}
+
+# ---------- 6) Site random effects caterpillar ----------
+site_params <- grep("^b_site_home\\[", param_names, value = TRUE)
+if(length(site_params) > 0){
+  site_mat <- samples_mat[, site_params, drop = FALSE]
+  site_mean <- apply(site_mat, 2, mean)
+  site_low <- apply(site_mat, 2, quantile, .025)
+  site_high <- apply(site_mat, 2, quantile, .975)
+  site_df <- data.frame(site = seq_along(site_params),
+                        param = site_params,
+                        mean = site_mean,
+                        low = site_low,
+                        high = site_high,
+                        stringsAsFactors = FALSE) %>%
+    arrange(mean)
+  # ggplot caterpillar
+  p_cat <- ggplot(site_df, aes(x = mean, y = reorder(param, mean))) +
+    geom_point() +
+    geom_errorbarh(aes(xmin = low, xmax = high), height = 0.2) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "grey40") +
+    labs(title = "Caterpillar: b_site_home", x = "Posterior mean (95% CI)", y = "site (param)") +
+    theme_minimal(base_size = 10)
+  print(p_cat)
+} else {
+  message("No b_site_home[...] parameters found for caterpillar.")
+}
+
+# ---------- 7) Posterior numeric summary (concise) ----------
+param_summary <- data.frame(
+  Parameter = param_names,
+  Mean = round(apply(samples_mat, 2, mean), 4),
+  Median = round(apply(samples_mat, 2, median), 4),
+  SD = round(apply(samples_mat, 2, sd), 4),
+  `2.5%` = round(apply(samples_mat, 2, quantile, 0.025), 4),
+  `97.5%` = round(apply(samples_mat, 2, quantile, 0.975), 4),
+  ESS = round(as.numeric(effectiveSize(samples)), 1),
+  stringsAsFactors = FALSE
+)
+cat("\nPosterior summary (showing 40 parameters sorted by ESS asc):\n")
+print(head(param_summary[order(param_summary$ESS), ], 40))
+
+# ---------- Problems summary ----------
+problem_rhat <- if(nrow(rhat_df)>0) rhat_df$Parameter[rhat_df$Rhat > 1.1] else character(0)
+problem_ess  <- ess_df$Parameter[ess_df$ESS < 200]
+problematic <- unique(c(problem_rhat, problem_ess))
+cat("\nProblematic parameters (Rhat>1.1 or ESS<200):\n")
+print(problematic)
+
+cat("\nDone. All plots drawn to the active plotting device. If you want fewer/more panels or different selections (e.g., only parameters with ESS<200), tell me and I'll update the selection logic.\n")
+
+```
 
 
 # MODIFIED IMPUTATION
