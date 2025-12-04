@@ -8,7 +8,7 @@ output:
     toc: false
 ---
 
-<!-- NOTE: To reference a figure in the report body, do \@ref(fig:NameOfFig). -->
+<!-- NOTE: To reference a figure in the report body, do @ref(fig:NameOfFig). -->
 
 # Background and Data
 
@@ -22,11 +22,15 @@ The study includes a baseline period, an implementation period overlapping with 
 
 We began by examining patterns of missingness across key variables. As shown in Figure @ref(fig:eda1), four variables had missingness: `Age`, `EMSvsCar`, `PreHospNotify`, and `Race2`, with age missing in about half of all records. Missingness for all variables was similar across outcome groups, indicating little evidence of outcome-dependent mechanisms. To assess site and time structure, we summarized missingness by site and study quarter in Figure @ref(fig:eda2). `Age` showed clear site-specific clustering, particularly at sites 140, 150, and 170, while `EMSvsCar`, `PreHospNotify`, and `Race2` showed smaller but visible site-level differences. No variable displayed a consistent temporal trend across sites. These structured patterns, especially concentrated gaps within specific sites, argue against a missing completely at random mechanism (MCAR), since MCAR would not generate the site-level heterogeneity observed in Figures @ref(fig:eda1) and @ref(fig:eda2). Instead, the data likely follow more complex missingness processes that must be addressed in the imputation strategy.
 
-In our initial approach, we utillized MICE to output 20 imputed datasets. We separately imputed three variables (`Age`, `EMSvsCar`, and `PreHospNotify`, as the `Race2` announcement was not made yet). The process involved first imputing age via predictive mean matching, one of the default setting in MICE and then imputing `EMSvsCar` and then `PreHospNotify` by a logistic regression mechanism. In this process, we had to enforce the interrelatedness constraints that existed in `PreHospNotify` and `EMSvsCar` so we adopted a post-processing step where after imputation was done, we set `PreHospNotify` = "No" whenever `EMSvsCar` = 1. To strengthen our approach, we later decided to instead create a new variable rather than do separate imputation of these two variables, which we describe below in modeling rationale. 
+In our initial approach, we utillized MICE to output 20 imputed datasets. We separately imputed three variables (`Age`, `EMSvsCar`, and `PreHospNotify`, as the `Race2` announcement was not made yet). The process involved first imputing age via predictive mean matching, one of the default setting in MICE and then imputing `EMSvsCar` and then `PreHospNotify` by a logistic regression mechanism. In this process, we had to enforce the interrelatedness constraints that existed in `PreHospNotify` and `EMSvsCar` so we adopted a post-processing step where after imputation was done, we set `PreHospNotify` = "No" whenever `EMSvsCar` = 1. To strengthen our approach, we later decided to instead create a new variable rather than do separate imputation of these two variables, which we describe subsequently in modeling rationale. 
+
+<!-- TIME-/SPACE- PERMITTING: SENSITIVITY ANALYSIS -->
+
+Figure @ref(fig:eda3) shows clear unadjusted patterns across predictors. Younger patients have much higher favorable discharge rates, while outcomes decline steadily with age. Markers of greater severity such as EMS arrival, thrombectomy, and thrombectomy complications are associated with lower favorable discharge. Other predictors including gender and race show little variation.
 
 ### Preliminary frequentist model
 
-After initially imputing 20 new data sets using mice, we ran a frequentist logistic regression model on each one to examine potential relationships. We saw similar coefficient estimates (Table XX) and AUC values across all 20 imputed data sets (Table XX), suggesting that mice effectively sampled from the correct distribution for our missing data. The most significant predictor by far was age, which was strongly tied to a negative impact on the log odds of a home or rehab outcome. Other significant predictors included race being African American, EMS vs. Car, and TPA complications. To examine model fit, we also looked at binned residual plots for each fitted model (Figure XX). This separated the fitted values into groups based on their expected probability of successful outcome, then calculated the average residual in each group. The residual plot was acceptable, but showed some systematic trends that could be tied to the age variable.
+After initially imputing 20 new data sets using mice, we ran a frequentist logistic regression model on each one to examine potential relationships. We saw similar coefficient estimates (Table @ref(tab:freq3)) and AUC values across all 20 imputed data sets (Table @ref(tab:freq4)), suggesting that mice effectively sampled from the correct distribution for our missing data. The most significant predictor by far was age, which was strongly tied to a negative impact on the log odds of a home or rehab outcome. Other significant predictors included race being African American, EMS vs. Car, and TPA complications. To examine model fit, we also looked at binned residual plots for each fitted model (Figure @ref(fig:freq1)). This separated the fitted values into groups based on their expected probability of successful outcome, then calculated the average residual in each group. The residual plot was acceptable, but showed some systematic trends that could be tied to the age variable.
 
 # Our Model
 
@@ -44,11 +48,11 @@ Race also necessitated imputation, and our group decided to follow the instructi
 
 One challenge in coding the JAGs model was ensuring cateogrical variables has baselines set, which was done to ensure reasonable interpretability of effects. 
 
-## Model implementation and evaluation
+## Model implementation
 
-### Model implementation
+<!-- TO-DO -->
 
-### Model evaluation
+## Model evaluation
 
 To examine convergence of our sampler, we examined traceplots (Figures XX), effective sample size (Table XX), and Rhat values (Table XX) for our parameters. Convergence diagnostics were strong for all parameters except for age, which is likely due to the fact that age was entirely missing for certain hospitals. Since we are imputing these age values each iteration of our sampler, there is a lot of variability and sensitivity in age. Still, the effective sample size for age is around 290 and we felt confident enough in our convergence to interpret results.
 
@@ -56,7 +60,11 @@ We also computed a binned residual plot again to compare it to our frequentist f
 
 ## Model results
 
+Table @ref(tag:bayes1) shows that the Bayesian model reaffirms the same core associations observed previously. Figure @ref(fig:bayes2) visualizes these effects on the odds ratio scale. Age shows the clearest effect, with a negative coefficient whose 95 percent credible interval lies entirely below zero, indicating a sharp decline in the odds of a favorable discharge as age increases. Female sex, thrombectomy, and thrombolysis complications likewise have posterior odds ratios credibly below one, reinforcing their consistent negative associations. In contrast, the TPA without complications group shows an odds ratio clearly above one, providing strong evidence of benefit and remaining the only treatment related factor with a reliably positive effect.
 
+The time indicators exhibit partial overlap with one, suggesting uncertain but directionally positive improvement in outcomes across the program periods. The median effects increase across time, and while the credible intervals include values near one, the posterior still points toward slightly better outcomes later in the study.
+
+The Bayesian results closely parallel those from the frequentist model: almost all effect directions and substantive conclusions agree. The main difference is the narrower posterior credible intervals, which is expected because the Bayesian approach incorporates prior structure that stabilizes estimation and reduces uncertainty when the data strongly support a given effect.
 
 # Shortcomings and Future Work
 
@@ -68,7 +76,7 @@ Finally, it may be worth looking into interactions between variables, which was 
 
 # Conclusion
 
-
+<!-- TO-DO -->
 
 \newpage
 
@@ -79,6 +87,10 @@ Finally, it may be worth looking into interactions between variables, which was 
 ```{r echo = FALSE, warning = FALSE, message = FALSE}
 
 library(tidyverse)
+library(mice)
+library(pROC)
+library(rjags)
+library(coda)
 ```
 
 ```{r echo = FALSE, warning = FALSE, message = FALSE}
@@ -101,6 +113,8 @@ missing_vars <- c("Age", "PreHospNotify", "EMSvsCar", "Race2")
 missing_vars <- missing_vars[missing_vars %in% names(x)]
 ```
 
+<!-- EDA AND DATA -->
+
 ```{r label = eda1, echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "Proportion of missingness by outcome for all variables with missingness", fig.show = 'hold'}
 
 eda1 <- x |>
@@ -120,7 +134,7 @@ ggplot(eda1, aes(x = homeOrRehab, y = prop_missing, fill = homeOrRehab)) +
   labs(
     title = "Missingness by Outcome",
     x = "Outcome",
-    y = "Percent missing"
+    y = "Percent Missing"
   ) +
   theme_minimal() +
   theme(
@@ -152,7 +166,7 @@ ggplot(eda2, aes(x = Time2, y = siteID, fill = prop_missing)) +
     title = "Missingness by Site and Time",
     x = "Study Quarter",
     y = "Site",
-    fill = "Percent missing"
+    fill = "Percent Missing"
   ) +
   theme_minimal() +
   theme(
@@ -161,8 +175,159 @@ ggplot(eda2, aes(x = Time2, y = siteID, fill = prop_missing)) +
   )
 ```
 
-```{r, warning=FALSE}
-library(pROC)
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+
+strokes <- x
+
+# factor conversions and TPA grouping
+strokes <- strokes %>%
+  mutate(
+    EMSvsCar = factor(EMSvsCar),
+    TPA_group = case_when(
+      hadTPA == FALSE ~ "NoTPA",
+      hadTPA == TRUE & tpaComplic == FALSE ~ "TPA_NoComp",
+      hadTPA == TRUE & tpaComplic == TRUE ~ "TPA_Comp"
+    ),
+    TPA_group = factor(TPA_group, levels = c("NoTPA", "TPA_NoComp", "TPA_Comp")),
+    siteID = factor(siteID)
+  ) %>%
+  select(-hadTPA, -tpaComplic)
+
+data <- strokes
+
+# STEP 1: Specify imputation methods
+# "" means: do NOT impute the variable
+method <- make.method(data)
+
+# set intended imputation methods
+method[c("Age", "EMSvsCar", "PreHospNotify")] <- c("pmm", "logreg", "logreg")
+
+# ensure NO OTHER variables are imputed
+other_vars <- setdiff(names(method), c("Age", "EMSvsCar", "PreHospNotify"))
+method[other_vars] <- ""
+
+# STEP 2: Build predictor matrix
+pred <- make.predictorMatrix(data)
+
+# Remove self-prediction for the imputed variables
+pred[c("Age", "EMSvsCar", "PreHospNotify"), c("Age", "EMSvsCar", "PreHospNotify")] <-
+  0 * pred[c("Age", "EMSvsCar", "PreHospNotify"), c("Age", "EMSvsCar", "PreHospNotify")]
+
+# STEP 3: Set the order of imputation
+visitSequence <- c("Age", "EMSvsCar", "PreHospNotify")
+
+# STEP 4: Run MICE
+imp <- mice(
+  data,
+  m = 20,
+  method = method,
+  predictorMatrix = pred,
+  visitSequence = visitSequence,
+  maxit = 20,
+  print = FALSE
+)
+```
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+
+completed_list <- mice::complete(imp, action = "all")
+
+fix_rule <- function(df) {
+  df$PreHospNotify[df$EMSvsCar == 0] <- "No"
+  return(df)
+}
+
+completed_fixed <- lapply(completed_list, fix_rule)
+```
+
+```{r label = eda3, echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "Association between predictors and favorable discharge", fig.height = 6, fig.show = 'hold'}
+
+# Use first imputed dataset
+eda_df <- complete(imp, 1)
+
+# Create age groups
+eda_df <- eda_df %>%
+  mutate(
+    AgeGroup = case_when(
+      Age < 55 ~ "<55",
+      Age >= 55 & Age <= 64 ~ "55-64",
+      Age >= 65 & Age <= 74 ~ "65-74",
+      Age >= 75 ~ "75+",
+      TRUE ~ NA_character_
+    ),
+    AgeGroup = factor(AgeGroup, levels = c("<55", "55-64", "65-74", "75+"))
+  )
+
+# Select variables and pivot
+assoc_df <- eda_df %>%
+  filter(!is.na(homeOrRehab)) %>%
+  select(
+    homeOrRehab,
+    AgeGroup,
+    Gender,
+    Race2,
+    EMSvsCar,
+    PreHospNotify,
+    hadThrombectomy,
+    thrComplic,
+    TPA_group
+  ) %>%
+  mutate(across(-homeOrRehab, as.character)) %>%  # Convert all predictors to character
+  pivot_longer(
+    cols = -homeOrRehab,
+    names_to = "Variable",
+    values_to = "Level"
+  ) %>%
+  filter(!is.na(Level)) %>%
+  group_by(Variable, Level) %>%
+  summarize(
+    n = n(),
+    prop_favorable = mean(homeOrRehab == TRUE),
+    se = sqrt(prop_favorable * (1 - prop_favorable) / n),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Variable = recode(
+      Variable,
+      AgeGroup = "Age Group",
+      Gender = "Gender",
+      Race2 = "Race",
+      EMSvsCar = "Arrival Mode",
+      PreHospNotify = "Pre-Hospital Notification",
+      hadThrombectomy = "Thrombectomy",
+      thrComplic = "Thrombectomy Complication",
+      TPA_group = "TPA Group"
+    )
+  )
+
+# Plot
+ggplot(assoc_df, aes(x = Level, y = prop_favorable)) +
+  geom_col(fill = "skyblue3") +
+  geom_errorbar(
+    aes(
+      ymin = pmax(0, prop_favorable - 1.96 * se),
+      ymax = pmin(1, prop_favorable + 1.96 * se)
+    ),
+    width = 0.2
+  ) +
+  facet_wrap(~ Variable, scales = "free_x", nrow = 3) +
+  scale_y_continuous(labels = scales::percent_format(), limits = c(0, 1)) +
+  labs(
+    title = "Association Between Predictors and Favorable Discharge",
+    x = "",
+    y = "Percent Favorable Discharge"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    strip.text = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+<!-- FREQUENTIST -->
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+
 results = NULL
 AUCs = NULL
 test <- readRDS("imputed_data")
@@ -173,22 +338,345 @@ for (i in 1:20){
   AUCs <- c(AUCs,auc(data$homeOrRehab,predict(modelFit,data)))
   results <- c(results, list(summary(modelFit)))
 }
+```
+
+```{r label = freq1, echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "Frequentist binned residual plot", fig.show = 'hold'}
+
 arm::binnedplot(fitted(modelFit),residuals(modelFit),main="Binned residual plot for frequentist fit")
+```
+
+```{r label = freq2, echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "Frequentist ROC curve", fig.show = 'hold', eval = FALSE}
+
+# [!] not talked about in writeup, so currently has eval = FALSE
+
 plot.roc(data$homeOrRehab,predict(modelFit,data),main="ROC curve for frequentist fit")
+```
+
+\newpage
+
+```{r label = freq3, echo = FALSE, warning = FALSE, message = FALSE}
+
 results[[1]]$coefficients |> 
   as.data.frame() |> 
   select(-`z value`) |> 
   kableExtra::kable(caption = "Coefficient estimates for frequentist fit")
+```
+
+```{r label = freq4, echo = FALSE, warning = FALSE, message = FALSE}
+
 data.frame(iter = seq(1,20), AUC = AUCs) |> 
   kableExtra::kable(caption = "AUC values for all 20 frequentist fits")
 ```
 
-```{r}
+\newpage
 
+<!-- BAYESIAN -->
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+
+# ----------------------------
+# 1. Data Wrangling & Baselines
+# ----------------------------
+strokes$Age[strokes$Age == ""] <- NA
+strokes$EMSvsCar[strokes$EMSvsCar == ""] <- NA
+strokes$PreHospNotify[strokes$PreHospNotify == ""] <- NA
+strokes$Race2[strokes$Race2 == "Missing"] <- NA
+
+# Race baseline = "Other"
+strokes$Race2 <- factor(strokes$Race2, levels = c("Caucasian", "African American", "Other"))
+strokes$Race2 <- relevel(strokes$Race2, ref = "Other")
+
+# TransportNotify baseline = "Other"
+strokes$TransportNotify <- factor(case_when(
+  strokes$EMSvsCar == "1" & strokes$PreHospNotify == "Yes" ~ "Yes",
+  strokes$EMSvsCar == "1" & strokes$PreHospNotify == "No" ~ "No",
+  TRUE ~ "Other"
+), levels = c("Yes", "No", "Other"))
+strokes$TransportNotify <- relevel(strokes$TransportNotify, ref = "Other")
+
+# Time2 baseline = "1"
+strokes$Time2 <- factor(case_when(
+  strokes$Time2 %in% c("Y1Q1", "Y1Q2") ~ "1",
+  strokes$Time2 %in% c("Y2Q3", "Y2Q4") ~ "3",
+  TRUE ~ "2"
+), levels = c("1","2","3"))
+strokes$Time2 <- relevel(strokes$Time2, ref = "1")
+
+# Other covariates
+strokes$homeOrRehab <- as.integer(strokes$homeOrRehab)
+strokes$siteID <- as.numeric(factor(strokes$siteID))
+
+# Drop unnecessary vars
+strokes <- strokes %>% select(-PreHospNotify, -EMSvsCar)
+
+# ----------------------------
+# 1. Prepare data
+# ----------------------------
+
+# Gender baseline = "Male"
+strokes$Gender <- factor(strokes$Gender, levels = c("Male","Female"))
+strokes$Gender <- relevel(strokes$Gender, ref = "Male")
+
+# Race, TransportNotify, Time2 as factors with explicit baselines
+strokes$Race2 <- factor(strokes$Race2, levels = c("Caucasian","African American","Other"))
+strokes$Race2 <- relevel(strokes$Race2, ref = "Caucasian")
+
+strokes$TransportNotify <- factor(strokes$TransportNotify, levels = c("Yes","No","Other"))
+strokes$TransportNotify <- relevel(strokes$TransportNotify, ref = "Yes")
+
+strokes$Time2 <- factor(strokes$Time2, levels = c("1","2","3"))
+strokes$Time2 <- relevel(strokes$Time2, ref = "1")
+
+# ----------------------------
+# 2. Build covariate matrix X
+# ----------------------------
+exclude_vars <- c("Age","Race2","TransportNotify","Time2","siteID","homeOrRehab")
+covariate_names <- setdiff(names(strokes), exclude_vars)
+
+# Ensure Gender is included
+if(!"Gender" %in% covariate_names) covariate_names <- c(covariate_names, "Gender")
+
+# Use treatment contrasts, keep intercept for baseline
+X_df <- model.matrix(~ ., data = strokes[, covariate_names, drop=FALSE],
+                     contrasts.arg = lapply(strokes[, covariate_names, drop=FALSE],
+                                            function(x) if(is.factor(x)) "contr.treatment" else NULL))
+X_df[is.na(X_df)] <- 0
+X <- as.matrix(X_df)
+NCOV <- ncol(X)
+cov_names <- colnames(X)
+
+# ----------------------------
+# 3. Categorical indices for JAGS
+# ----------------------------
+race_idx <- as.numeric(strokes$Race2)
+tr_idx <- as.numeric(strokes$TransportNotify)
+time_idx <- as.numeric(strokes$Time2)
+site_idx <- strokes$siteID
+
+N <- nrow(strokes)
+nsite <- length(unique(site_idx))
+K_race <- length(levels(strokes$Race2))
+K_tr <- length(levels(strokes$TransportNotify))
+K_time <- length(levels(strokes$Time2))
+
+# ----------------------------
+# 4. JAGS data
+# ----------------------------
+jags_data <- list(
+  N = N,
+  X = X,
+  NCOV = NCOV,
+  site = site_idx,
+  nsite = nsite,
+  time = time_idx,
+  K_time = K_time,
+  Y = strokes$homeOrRehab,
+  race = race_idx,
+  tr = tr_idx,
+  K_race = K_race,
+  K_tr = K_tr,
+  age = as.numeric(strokes$Age)
+)
+
+# ----------------------------
+# 5. JAGS model string
+# ----------------------------
+model_string <- "
+model {
+  # Age imputation
+  for(i in 1:N){
+    age[i] ~ dnorm(mu_age[i], tau_age)
+    mu_age[i] <- beta0_age + b_site_age[site[i]]
+  }
+  beta0_age ~ dnorm(0,0.001)
+  tau_age ~ dgamma(0.01,0.01)
+  for(s in 1:nsite){ b_site_age[s] ~ dnorm(0, tau_b_age) }
+  tau_b_age ~ dgamma(0.01,0.01)
+
+  # Race imputation
+  pi_race[1:K_race] ~ ddirch(rep(1,K_race))
+  for(i in 1:N){ race[i] ~ dcat(pi_race[1:K_race]) }
+  beta_race[1] <- 0
+  for(k in 2:K_race){ beta_race[k] ~ dnorm(0,0.001) }
+
+  # TransportNotify imputation
+  pi_tr[1:K_tr] ~ ddirch(rep(1,K_tr))
+  for(i in 1:N){ tr[i] ~ dcat(pi_tr[1:K_tr]) }
+  beta_tr[1] <- 0
+  for(k in 2:K_tr){ beta_tr[k] ~ dnorm(0,0.001) }
+
+  # Time effects
+  beta_time[1] <- 0
+  for(k in 2:K_time){ beta_time[k] ~ dnorm(0,0.001) }
+
+  # Logistic regression
+  for(i in 1:N){
+    Y[i] ~ dbern(p[i])
+    logit(p[i]) <- beta0 + inprod(beta[], X[i,]) +
+                   beta_age*age[i] +
+                   beta_race[race[i]] +
+                   beta_tr[tr[i]] +
+                   beta_time[time[i]] +
+                   b_site_home[site[i]]
+  }
+
+  # Priors
+  beta0 ~ dnorm(0,0.001)
+  for(j in 1:NCOV){ beta[j] ~ dnorm(0,0.001) }
+  beta_age ~ dnorm(0,0.001)
+  for(s in 1:nsite){ b_site_home[s] ~ dnorm(0, tau_home) }
+  tau_home ~ dgamma(0.01,0.01)
+}
+"
+writeLines(model_string, "model_impute_all_fixed_gender.txt")
+
+# ----------------------------
+# 6. Initial values
+# ----------------------------
+inits_fn <- function(){
+  inits <- list()
+  inits$beta0 <- 0
+  inits$beta <- rep(0, NCOV)
+  inits$beta_age <- 0
+  inits$b_site_home <- rep(0, nsite)
+  inits$b_site_age <- rep(0, nsite)
+  inits$tau_home <- 1
+  inits$tau_age <- 1
+  inits$tau_b_age <- 1
+
+  # Age missing
+  age_init <- rep(NA_real_, N)
+  missing_age <- which(is.na(jags_data$age))
+  if(length(missing_age) > 0) age_init[missing_age] <- mean(strokes$Age, na.rm = TRUE)
+  inits$age <- age_init
+
+  # Race missing
+  race_init <- rep(NA_integer_, N)
+  missing_race <- which(is.na(jags_data$race))
+  if(length(missing_race) > 0) race_init[missing_race] <- sample(1:K_race, length(missing_race), replace = TRUE)
+  inits$race <- race_init
+
+  # TransportNotify missing
+  tr_init <- rep(NA_integer_, N)
+  missing_tr <- which(is.na(jags_data$tr))
+  if(length(missing_tr) > 0) tr_init[missing_tr] <- sample(1:K_tr, length(missing_tr), replace = TRUE)
+  inits$tr <- tr_init
+
+  # Dirichlet
+  inits$pi_race <- rep(1/K_race, K_race)
+  inits$pi_tr <- rep(1/K_tr, K_tr)
+  return(inits)
+}
+inits_list <- list(inits_fn(), inits_fn(), inits_fn())
+
+# ----------------------------
+# 7. Run JAGS
+# ----------------------------
+jmod <- jags.model(file = "model_impute_all_fixed_gender.txt",
+                   data = jags_data,
+                   inits = inits_list,
+                   n.chains = 3,
+                   n.adapt = 1000)
+update(jmod, 2000)
+
+monitor_vars <- c("beta0","beta","beta_age","beta_race","beta_tr","beta_time","b_site_home")
+samples <- coda.samples(jmod, variable.names = monitor_vars, n.iter = 20000)
+
+# ----------------------------
+# 8. Extract coefficients and credible intervals
+# ----------------------------
+samples_matrix <- as.matrix(samples)
+
+# Base names
+coef_names <- c("Intercept", colnames(X), "Age")
+
+# Add categorical non-baseline levels
+factor_list <- list(
+  Race2 = levels(strokes$Race2),
+  TransportNotify = levels(strokes$TransportNotify),
+  Time2 = levels(strokes$Time2)
+)
+for(f in names(factor_list)){
+  levs <- factor_list[[f]]
+  if(length(levs) > 1){
+    for(k in 2:length(levs)){
+      coef_names <- c(coef_names, paste0(f, "_", levs[k]))
+    }
+  }
+}
+
+# Map JAGS columns
+param_order <- c("beta0", paste0("beta[", 1:NCOV, "]"), "beta_age")
+if(K_race > 1) param_order <- c(param_order, paste0("beta_race[", 2:K_race, "]"))
+if(K_tr > 1) param_order <- c(param_order, paste0("beta_tr[", 2:K_tr, "]"))
+if(K_time > 1) param_order <- c(param_order, paste0("beta_time[", 2:K_time, "]"))
+
+coef_samples <- samples_matrix[, param_order, drop=FALSE]
 ```
 
+```{r label = bayes1, echo = FALSE, warning = FALSE, message = FALSE}
 
+summary_df <- data.frame(
+  Variable = coef_names,
+  Median = apply(coef_samples, 2, median),
+  Lower95 = apply(coef_samples, 2, quantile, probs=0.025),
+  Upper95 = apply(coef_samples, 2, quantile, probs=0.975)
+) %>%
+  mutate(across(2:4, round, 3)) %>%
+  kableExtra::kable(caption = "Posterior Summary Statistics (Median and 95% Credible Intervals)")
 
+summary_df
+```
+
+```{r label = bayes2, echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "Posterior Odds Ratio with 95% Credible Interval", fig.show = 'hold'}
+
+# compute posterior median and 95% CrI on log-odds scale
+median_log  <- apply(coef_samples, 2, median, na.rm = TRUE)
+lower95_log <- apply(coef_samples, 2, quantile, probs = 0.025, na.rm = TRUE)
+upper95_log <- apply(coef_samples, 2, quantile, probs = 0.975, na.rm = TRUE)
+
+# table (param_order and coef_names are aligned by construction above)
+or_tab <- data.frame(
+  jags_param = param_order,
+  label = coef_names,
+  median_log = as.numeric(median_log[param_order]),
+  lower95_log = as.numeric(lower95_log[param_order]),
+  upper95_log = as.numeric(upper95_log[param_order]),
+  stringsAsFactors = FALSE
+)
+
+# drop intercept (beta0) so only variables shown
+or_tab <- or_tab %>% filter(!(jags_param %in% c("beta0") | label %in% c("Intercept", "(Intercept)")))
+
+# convert to OR scale (median of log -> exp(median); and quantiles -> exp(quantiles))
+or_tab <- or_tab %>%
+  mutate(
+    OR = exp(median_log),
+    OR_low = exp(lower95_log),
+    OR_high = exp(upper95_log)
+  )
+
+# order for plotting (adjust to taste)
+or_tab <- or_tab %>%
+  arrange(OR) %>%
+  mutate(label = factor(label, levels = label))   # keeps arranged order (bottom -> top)
+
+# plot
+p_or_med <- ggplot(or_tab, aes(x = OR, y = label)) +
+  geom_point(size = 3) +
+  geom_errorbarh(aes(xmin = OR_low, xmax = OR_high), height = 0.25) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey40") +
+  scale_x_continuous(expand = expansion(mult = c(0.02, 0.1))) +
+  labs(
+    title = "Posterior Odds Ratios (Median, 95% CrI)",
+    x = "Odds Ratio (Median) with 95% CrI",
+    y = ""
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(panel.grid.minor = element_blank(), axis.text.y = element_text(size = 11))
+
+print(p_or_med)
+```
 
 
 
