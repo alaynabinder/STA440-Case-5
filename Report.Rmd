@@ -10,25 +10,41 @@ output:
 
 <!-- NOTE: To reference a figure in the report body, do \@ref(fig:NameOfFig). -->
 
-# Background
+# Background and Data
 
+Stroke is a time-sensitive emergency and a leading cause of death and long-term disability in the United States. Because symptoms are often subtle and painless, many patients present late, limiting the effectiveness of reperfusion therapies such as thrombolytics (TPA) and mechanical thrombectomy.
 
+This report analyzes data from a two-year regional improvement program aimed at reducing delays in acute stroke care. Program initiatives focused on enhancing stroke recognition by the public and providers, strengthening EMS assessment and prehospital notification, and streamlining pathways among emergency departments, neurology consultants, and comprehensive stroke centers to accelerate treatment decisions.
 
-## The Data
-
-
+The study includes a baseline period, an implementation period overlapping with the COVID-19 pandemic, and a final period after full program rollout. We examine ischemic stroke patients who received TPA, mechanical thrombectomy, or both, with goals of identifying factors associated with favorable discharge outcomes, evaluating outcome changes over time, and addressing substantial missing data in key covariates.
 
 ## Exploratory Data Analysis
 
+<<<<<<< HEAD
 ### Preliminary frequentist model
 
 After initially imputing 20 new data sets using mice, we ran a frequentist logistic regression model on each one to examine potential relationships. We saw similar coefficient estimates (Table XX) and AUC values across all 20 imputed data sets (Table XX), suggesting that mice effectively sampled from the correct distribution for our missing data. The most significant predictor by far was age, which was strongly tied to a negative impact on the log odds of a home or rehab outcome. Other significant predictors included race being African American, EMS vs. Car, and TPA complications. To examine model fit, we also looked at binned residual plots for each fitted model (Figure XX). This separated the fitted values into groups based on their expected probability of successful outcome, then calculated the average residual in each group. The residual plot was acceptable, but showed some systematic trends that could be tied to the age variable.
+=======
+We began by examining patterns of missingness across key variables. As shown in Figure @ref(fig:eda1), four variables had missingness: `Age`, `EMSvsCar`, `PreHospNotify`, and `Race2`, with age missing in about half of all records. Missingness for all variables was similar across outcome groups, indicating little evidence of outcome-dependent mechanisms. To assess site and time structure, we summarized missingness by site and study quarter in Figure @ref(fig:eda2). `Age` showed clear site-specific clustering, particularly at sites 140, 150, and 170, while `EMSvsCar`, `PreHospNotify`, and `Race2` showed smaller but visible site-level differences. No variable displayed a consistent temporal trend across sites. These structured patterns, especially concentrated gaps within specific sites, argue against a missing completely at random mechanism (MCAR), since MCAR would not generate the site-level heterogeneity observed in Figures @ref(fig:eda1) and @ref(fig:eda2). Instead, the data likely follow more complex missingness processes that must be addressed in the imputation strategy.
+
+In our initial approach, we utillized MICE to output 20 imputed datasets. We separately imputed three variables (`Age`, `EMSvsCar`, and `PreHospNotify`, as the `Race2` announcement was not made yet). The process involved first imputing age via predictive mean matching, one of the default setting in MICE and then imputing `EMSvsCar` and then `PreHospNotify` by a logistic regression mechanism. In this process, we had to enforce the interrelatedness constraints that existed in `PreHospNotify` and `EMSvsCar` so we adopted a post-processing step where after imputation was done, we set `PreHospNotify` = "No" whenever `EMSvsCar` = 1. To strengthen our approach, we later decided to instead create a new variable rather than do separate imputation of these two variables, which we describe below in modeling rationale. 
+>>>>>>> f8a5948215d0f63e98cd62eb9d9f2d919873603e
 
 # Our Model
 
 ## Model rationale
 
+To model our binary outcome which represents positive or negative outcome with $Y_i = 1$ representing going to home or rehab, we adopted a Bayesian logistic regression. We fit a model where every covariate in the model had a simple relationship with the logistic link, but we did choose to incorporate a random intercept for sites due to independence concerns. To have independent observations, we believed it necessary to account for the random noise that the site introduced. An important component in the modeling process was tackling the missing data. In fact, our model also incorporated imputation for missing age, race, and transport/notification data.  
 
+We represent our final logistic model as $\text{logit}(p_i) = \beta_0 + \mathbf{X}_i^\top \boldsymbol{\beta} + \beta_{\text{age}} \cdot \text{age}_i + \beta_{\text{race}, \text{race}_i} + \beta_{\text{tr}, \text{tr}_i} + \beta_{\text{time}, \text{time}_i} + b_{\text{site}, \text{site}_i}$, where $\mathbf{X}_i$ captures other fixed covariates (like Gender), $\text{race}_i \in \{1,\dots,K_{\text{race}}\}$, $\text{tr}_i \in \{1,\dots,K_{\text{tr}}\}$, and $\text{time}_i \in \{1,\dots,K_{\text{time}}\}$ are categorical indices with baselines fixed at zero ($\beta_{\text{race},1} = \beta_{\text{tr},1} = \beta_{\text{time},1} = 0$), site random effects follow $b_{\text{site},s} \sim \mathcal{N}(0, \tau_{\text{home}}^{-1})$, and all fixed effects use vague priors $\beta_0, \boldsymbol{\beta}, \beta_{\text{age}}, \beta_{\text{race},k \ge 2}, \beta_{\text{tr},k \ge 2}, \beta_{\text{time},k \ge 2} \sim \mathcal{N}(0,1000)$ with $\tau_{\text{home}} \sim \text{Gamma}(0.01,0.01)$. The priors were chosen to allow the data inform the parameters. 
+
+We adopt a modeling pipeline to address missingness in age, race, EMSvsCar, and PreHospNotify. Our first consideration was the inherent relatedness of the EMSvsCar and the PreHospNotify variables. In fact, we see these variables are related because if someone rode in a car, there couldn't be a prehospital notification. For this reason, we created a new variable called transportNotify that had three levels representing the possible combinations of these two variables. From here, we imputed this covariate.
+
+Both transportNotify and age were imputed to rely on the non-missing features in the data as well as the random effects for site. We present transportNotify and age as categorical and normally distributed variables repsectively and set noninformative priors. Specifiically, for age we use the priors $\beta_{0,\text{age}} \sim \mathcal{N}(0,1000)$, $\tau_{\text{age}}, \tau_{b,\text{age}} \sim \text{Gamma}(0.01,0.01)$. For, the categorical transportNotify, we adopt $\text{Dirichlet}(\mathbf{1})$ priors. These priors were chosen to allow for data to inform the imputation. 
+
+Race also necessitated imputation, and our group decided to follow the instruction of imputing race based on iste. We adopted dirichlet-categorical imputation where $\boldsymbol{\pi}_{\text{race}} \sim \text{Dirichlet}(\mathbf{1}_{K_{\text{race}}})$ so $\text{race}_i \sim \text{Categorical}(\boldsymbol{\pi}_{\text{race}})$. 
+
+One challenge in coding the JAGs model was ensuring cateogrical variables has baselines set, which was done to ensure reasonable interpretability of effects. 
 
 ## Model implementation and evaluation
 
@@ -58,6 +74,99 @@ We also computed a binned residual plot again to compare it to our frequentist f
 
 ## Tables and Figures
 
-```{r label = "NameOfFig", echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "INSERT CAPTION HERE", fig.show = 'hold'}
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+
+library(tidyverse)
+```
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+
+load("strokeStudy.RData")
+```
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+
+x <- x |>
+  mutate(Race2 = case_when(
+    !is.na(Race2) & tolower(Race2) == "missing" ~ NA_character_,
+    TRUE ~ as.character(Race2)
+  ),
+  across(all_of(c("Age","PreHospNotify","EMSvsCar","Race2")[c("Age","PreHospNotify","EMSvsCar","Race2") %in% names(x)]),
+         as.character),
+  Time2 = factor(Time2, levels = unique(Time2)))
+
+missing_vars <- c("Age", "PreHospNotify", "EMSvsCar", "Race2")
+missing_vars <- missing_vars[missing_vars %in% names(x)]
+```
+
+```{r label = eda1, echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "Proportion of missingness by outcome for all variables with missingness", fig.show = 'hold'}
+
+eda1 <- x |>
+  filter(!is.na(homeOrRehab)) |>
+  pivot_longer(all_of(missing_vars),
+               names_to = "variable",
+               values_to = "value") |>
+  mutate(is_missing = is.na(value)) |>
+  group_by(variable, homeOrRehab) |>
+  summarize(prop_missing = mean(is_missing), .groups = "drop")
+
+ggplot(eda1, aes(x = homeOrRehab, y = prop_missing, fill = homeOrRehab)) +
+  geom_col(width = 0.65) +
+  facet_wrap(~ variable) +
+  scale_fill_manual(values = c("steelblue4", "skyblue3")) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(
+    title = "Missingness by Outcome",
+    x = "Outcome",
+    y = "Percent missing"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold")
+  )
+```
+
+```{r label = eda2, echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "Heatmap of missingness by site and study quarter for all variables with missingness", fig.show = 'hold'}
+
+eda2 <- x |>
+  select(siteID, Time2, all_of(missing_vars)) |>
+  pivot_longer(all_of(missing_vars),
+               names_to = "variable",
+               values_to = "value") |>
+  mutate(is_missing = is.na(value)) |>
+  group_by(siteID, Time2, variable) |>
+  summarize(prop_missing = mean(is_missing), .groups = "drop")
+
+ggplot(eda2, aes(x = Time2, y = siteID, fill = prop_missing)) +
+  geom_tile() +
+  facet_wrap(~ variable, nrow = 2) +
+  scale_fill_distiller(
+    palette = "Blues",
+    direction = 1,
+    labels = scales::percent_format()
+  ) +
+  labs(
+    title = "Missingness by Site and Time",
+    x = "Study Quarter",
+    y = "Site",
+    fill = "Percent missing"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 30, hjust = 1, size = 8),
+    strip.text = element_text(face = "bold")
+  )
+```
+
+```{r}
 
 ```
+
+
+
+
+
+
+
+
