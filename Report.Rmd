@@ -20,7 +20,9 @@ output:
 
 ## Exploratory Data Analysis
 
+### Preliminary frequentist model
 
+After initially imputing 20 new data sets using mice, we ran a frequentist logistic regression model on each one to examine potential relationships. We saw similar coefficient estimates (Table XX) and AUC values across all 20 imputed data sets (Table XX), suggesting that mice effectively sampled from the correct distribution for our missing data. The most significant predictor by far was age, which was strongly tied to a negative impact on the log odds of a home or rehab outcome. Other significant predictors included race being African American, EMS vs. Car, and TPA complications. To examine model fit, we also looked at binned residual plots for each fitted model (Figure XX). This separated the fitted values into groups based on their expected probability of successful outcome, then calculated the average residual in each group. The residual plot was acceptable, but showed some systematic trends that could be tied to the age variable.
 
 # Our Model
 
@@ -31,6 +33,12 @@ output:
 ## Model implementation and evaluation
 
 
+
+### Model evaluation
+
+To examine convergence of our sampler, we examined traceplots (Figures XX), effective sample size (Table XX), and Rhat values (Table XX) for our parameters. Convergence diagnostics were strong for all parameters except for age, which is likely due to the fact that age was entirely missing for certain hospitals. Since we are imputing these age values each iteration of our sampler, there is a lot of variability and sensitivity in age. Still, the effective sample size for age is around 290 and we felt confident enough in our convergence to interpret results.
+
+We also computed a binned residual plot again to compare it to our frequentist fit and examine model assumptions (Figure XX). We saw improvement in the residual plot in terms of randomness compared to our frequentist model, as there does not appear to be a trend in the residuals or any heteroskedascticity.
 
 ## Model results
 
