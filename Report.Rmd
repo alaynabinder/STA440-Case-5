@@ -20,15 +20,13 @@ The study includes a baseline period, an implementation period overlapping with 
 
 ## Exploratory Data Analysis
 
-<<<<<<< HEAD
-### Preliminary frequentist model
-
-After initially imputing 20 new data sets using mice, we ran a frequentist logistic regression model on each one to examine potential relationships. We saw similar coefficient estimates (Table XX) and AUC values across all 20 imputed data sets (Table XX), suggesting that mice effectively sampled from the correct distribution for our missing data. The most significant predictor by far was age, which was strongly tied to a negative impact on the log odds of a home or rehab outcome. Other significant predictors included race being African American, EMS vs. Car, and TPA complications. To examine model fit, we also looked at binned residual plots for each fitted model (Figure XX). This separated the fitted values into groups based on their expected probability of successful outcome, then calculated the average residual in each group. The residual plot was acceptable, but showed some systematic trends that could be tied to the age variable.
-=======
 We began by examining patterns of missingness across key variables. As shown in Figure @ref(fig:eda1), four variables had missingness: `Age`, `EMSvsCar`, `PreHospNotify`, and `Race2`, with age missing in about half of all records. Missingness for all variables was similar across outcome groups, indicating little evidence of outcome-dependent mechanisms. To assess site and time structure, we summarized missingness by site and study quarter in Figure @ref(fig:eda2). `Age` showed clear site-specific clustering, particularly at sites 140, 150, and 170, while `EMSvsCar`, `PreHospNotify`, and `Race2` showed smaller but visible site-level differences. No variable displayed a consistent temporal trend across sites. These structured patterns, especially concentrated gaps within specific sites, argue against a missing completely at random mechanism (MCAR), since MCAR would not generate the site-level heterogeneity observed in Figures @ref(fig:eda1) and @ref(fig:eda2). Instead, the data likely follow more complex missingness processes that must be addressed in the imputation strategy.
 
 In our initial approach, we utillized MICE to output 20 imputed datasets. We separately imputed three variables (`Age`, `EMSvsCar`, and `PreHospNotify`, as the `Race2` announcement was not made yet). The process involved first imputing age via predictive mean matching, one of the default setting in MICE and then imputing `EMSvsCar` and then `PreHospNotify` by a logistic regression mechanism. In this process, we had to enforce the interrelatedness constraints that existed in `PreHospNotify` and `EMSvsCar` so we adopted a post-processing step where after imputation was done, we set `PreHospNotify` = "No" whenever `EMSvsCar` = 1. To strengthen our approach, we later decided to instead create a new variable rather than do separate imputation of these two variables, which we describe below in modeling rationale. 
->>>>>>> f8a5948215d0f63e98cd62eb9d9f2d919873603e
+
+### Preliminary frequentist model
+
+After initially imputing 20 new data sets using mice, we ran a frequentist logistic regression model on each one to examine potential relationships. We saw similar coefficient estimates (Table XX) and AUC values across all 20 imputed data sets (Table XX), suggesting that mice effectively sampled from the correct distribution for our missing data. The most significant predictor by far was age, which was strongly tied to a negative impact on the log odds of a home or rehab outcome. Other significant predictors included race being African American, EMS vs. Car, and TPA complications. To examine model fit, we also looked at binned residual plots for each fitted model (Figure XX). This separated the fitted values into groups based on their expected probability of successful outcome, then calculated the average residual in each group. The residual plot was acceptable, but showed some systematic trends that could be tied to the age variable.
 
 # Our Model
 
@@ -48,7 +46,7 @@ One challenge in coding the JAGs model was ensuring cateogrical variables has ba
 
 ## Model implementation and evaluation
 
-
+### Model implementation
 
 ### Model evaluation
 
@@ -62,7 +60,11 @@ We also computed a binned residual plot again to compare it to our frequentist f
 
 # Shortcomings and Future Work
 
+A major shortcoming of our model was the low effective sample size for age, which while likely tied to complete missing blocks of age for certain hospitals, decreases the confidence in our results, especially considering that age appears to be such a major factor in stroke outcomes. Future work should include examining alternate methods of imputing age, performing sensitivity analysis on the choice of priors, and possibly transforming age in our final logistic model.
 
+Another shortcoming of our analysis is the inability to determine whether missing data had some dependence on a latent, unobserved variable. For example, it is possible that geographic location or insurance-status of each hospital was related to the age of its patients in some way. So, future work may also include collecting additional information on each hospital or repeating the experiment to limit the amount of data missing and increase confidence that missing data is not MNAR.
+
+Finally, it may be worth looking into interactions between variables, which was not explored in this analysis. It is often true in medical setting that comorbidities interact with each other, so the predictive performance of the model may be aided by trying to capture these relationships.
 
 # Conclusion
 
@@ -157,6 +159,28 @@ ggplot(eda2, aes(x = Time2, y = siteID, fill = prop_missing)) +
     axis.text.x = element_text(angle = 30, hjust = 1, size = 8),
     strip.text = element_text(face = "bold")
   )
+```
+
+```{r, warning=FALSE}
+library(pROC)
+results = NULL
+AUCs = NULL
+test <- readRDS("imputed_data")
+for (i in 1:20){
+  data <- test[[i]]
+  data$homeOrRehab <- if_else(data$homeOrRehab,1,0)
+  modelFit <- glm(factor(homeOrRehab) ~ ., data = data, family = "binomial")
+  AUCs <- c(AUCs,auc(data$homeOrRehab,predict(modelFit,data)))
+  results <- c(results, list(summary(modelFit)))
+}
+arm::binnedplot(fitted(modelFit),residuals(modelFit),main="Binned residual plot for frequentist fit")
+plot.roc(data$homeOrRehab,predict(modelFit,data),main="ROC curve for frequentist fit")
+results[[1]]$coefficients |> 
+  as.data.frame() |> 
+  select(-`z value`) |> 
+  kableExtra::kable(caption = "Coefficient estimates for frequentist fit")
+data.frame(iter = seq(1,20), AUC = AUCs) |> 
+  kableExtra::kable(caption = "AUC values for all 20 frequentist fits")
 ```
 
 ```{r}
