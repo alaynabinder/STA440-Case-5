@@ -785,6 +785,357 @@ print(summary_df)
 ```
 
 ```{r}
+# ---- Posterior Odds Ratio forest (median + 95% CrI) ----
+library(dplyr)
+library(ggplot2)
+
+# safety checks
+stopifnot(exists("coef_samples"), exists("param_order"), exists("coef_names"))
+
+# compute posterior median and 95% CrI on log-odds scale
+median_log  <- apply(coef_samples, 2, median, na.rm = TRUE)
+lower95_log <- apply(coef_samples, 2, quantile, probs = 0.025, na.rm = TRUE)
+upper95_log <- apply(coef_samples, 2, quantile, probs = 0.975, na.rm = TRUE)
+
+# assemble table (param_order and coef_names are aligned by construction above)
+or_tab <- data.frame(
+  jags_param = param_order,
+  label = coef_names,
+  median_log = as.numeric(median_log[param_order]),
+  lower95_log = as.numeric(lower95_log[param_order]),
+  upper95_log = as.numeric(upper95_log[param_order]),
+  stringsAsFactors = FALSE
+)
+
+# drop intercept (beta0) so only variables shown
+or_tab <- or_tab %>% filter(!(jags_param %in% c("beta0") | label %in% c("Intercept", "(Intercept)")))
+
+# convert to OR scale (median of log -> exp(median); and quantiles -> exp(quantiles))
+or_tab <- or_tab %>%
+  mutate(
+    OR = exp(median_log),
+    OR_low = exp(lower95_log),
+    OR_high = exp(upper95_log)
+  )
+
+# order for plotting (adjust to taste)
+or_tab <- or_tab %>%
+  arrange(OR) %>%
+  mutate(label = factor(label, levels = label))   # keeps arranged order (bottom -> top)
+
+# plot
+p_or_med <- ggplot(or_tab, aes(x = OR, y = label)) +
+  geom_point(size = 3) +
+  geom_errorbarh(aes(xmin = OR_low, xmax = OR_high), height = 0.25) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey40") +
+  scale_x_continuous(expand = expansion(mult = c(0.02, 0.1))) +
+  labs(
+    title = "Posterior Odds Ratios (Median, 95% CrI)",
+    x = "Odds Ratio (Median) with 95% CrI",
+    y = ""
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(panel.grid.minor = element_blank(), axis.text.y = element_text(size = 11))
+
+print(p_or_med)
+
+# save outputs
+ggsave("posterior_odds_ratios_median_forest.png", p_or_med, width = 8, height = 6, dpi = 300)
+write.csv(or_tab, "posterior_odds_ratios_median_table.csv", row.names = FALSE)
+
+cat("Saved posterior plot to 'posterior_odds_ratios_median_forest.png' and table to 'posterior_odds_ratios_median_table.csv'\n")
+
+```
+
+
+```{r}
+# ----------------------------
+# Map JAGS parameter names -> human-friendly labels + relabel diagnostics
+# ----------------------------
+
+# Assumptions:
+# - samples_matrix: matrix of posterior draws (as.matrix(samples))
+# - param_order: vector of parameter names in samples_matrix in the order you used to build coef_samples
+# - cov_names: column names of X (order matching beta[1:NCOV])
+# - strokes: dataframe used in the model
+# - K_race, K_tr, K_time and their level names are available
+
+# 1) Build mapping
+human_labels <- character(length = length(param_order))
+
+for(i in seq_along(param_order)){
+  p <- param_order[i]
+  # intercept
+  if(p == "beta0"){
+    human_labels[i] <- "Intercept"
+    next
+  }
+  # beta j -> covariate name (X columns)
+  if(grepl("^beta\\[[0-9]+\\]", p)){
+    j <- as.integer(gsub("^beta\\[([0-9]+)\\]$", "\\1", p))
+    if(j <= length(cov_names)){
+      human_labels[i] <- cov_names[j]
+    } else {
+      human_labels[i] <- paste0("beta[", j, "]") # fallback
+    }
+    next
+  }
+  # beta_age
+  if(p == "beta_age"){
+    human_labels[i] <- "Age"
+    next
+  }
+  # beta_race[k]  (these are only for k = 2..K_race in param_order)
+  if(grepl("^beta_race\\[", p)){
+    k <- as.integer(gsub("^beta_race\\[([0-9]+)\\]$", "\\1", p))
+    # get full level names; baseline in JAGS was beta_race[1] = 0
+    race_levs <- levels(strokes$Race2)
+    if(k >= 1 && k <= length(race_levs)){
+      human_labels[i] <- paste0("Race2_", race_levs[k])
+    } else {
+      human_labels[i] <- p
+    }
+    next
+  }
+  # beta_tr[k]
+  if(grepl("^beta_tr\\[", p)){
+    k <- as.integer(gsub("^beta_tr\\[([0-9]+)\\]$", "\\1", p))
+    tr_levs <- levels(strokes$TransportNotify)
+    if(k >= 1 && k <= length(tr_levs)){
+      human_labels[i] <- paste0("TransportNotify_", tr_levs[k])
+    } else human_labels[i] <- p
+    next
+  }
+  # beta_time[k]
+  if(grepl("^beta_time\\[", p)){
+    k <- as.integer(gsub("^beta_time\\[([0-9]+)\\]$", "\\1", p))
+    time_levs <- levels(strokes$Time2)
+    if(k >= 1 && k <= length(time_levs)){
+      human_labels[i] <- paste0("Time2_", time_levs[k])
+    } else human_labels[i] <- p
+    next
+  }
+  # fallback
+  human_labels[i] <- p
+}
+
+param_map <- data.frame(
+  jags_param = param_order,
+  human_label = human_labels,
+  stringsAsFactors = FALSE
+)
+
+# print and save mapping
+print(param_map)
+write.csv(param_map, "jags_param_map.csv", row.names = FALSE)
+
+# 2) Helpful lookup function to relabel any diagnostic table/plot
+relabel_vec <- function(vec){
+  # vec is character vector of jags param names
+  idx <- match(vec, param_map$jags_param)
+  lab <- param_map$human_label[idx]
+  # where missing keep original
+  lab[is.na(lab)] <- vec[is.na(lab)]
+  return(lab)
+}
+
+# Example: relabel your numeric summaries (rhat_df, ess_df, param_summary)
+if(exists("rhat_df") && nrow(rhat_df) > 0){
+  rhat_df$Parameter_human <- relabel_vec(as.character(rhat_df$Parameter))
+  rhat_df <- rhat_df %>% arrange(desc(Rhat))
+  cat("\nTop R-hat (with human labels):\n")
+  print(head(rhat_df %>% select(Parameter_human, Rhat, Rhat_upper), 30))
+}
+
+if(exists("ess_df") && nrow(ess_df) > 0){
+  ess_df$Parameter_human <- relabel_vec(as.character(ess_df$Parameter))
+  ess_df <- ess_df %>% arrange(ESS)
+  cat("\nLowest ESS (with human labels):\n")
+  print(head(ess_df %>% select(Parameter_human, ESS), 30))
+}
+
+# If you constructed param_summary earlier, relabel it for printing and plotting:
+if(exists("param_summary")){
+  param_summary$Parameter_human <- relabel_vec(as.character(param_summary$Parameter))
+  # useful sort
+  param_summary <- param_summary %>% arrange(ESS)
+  write.csv(param_summary, "posterior_param_summary_with_human_labels.csv", row.names = FALSE)
+}
+
+# 3) Use human labels in ACF and trace plots
+# The code that built acf_df and trace_df earlier used Parameter names from samples_mat.
+# Replace/augment Parameter with the human label for plotting.
+
+if(exists("acf_df")){
+  acf_df$Parameter_human <- relabel_vec(as.character(acf_df$Parameter))
+  # when plotting, use Parameter_human as facet variable:
+  p_acf_human <- ggplot(acf_df, aes(x = Lag, y = ACF)) +
+    geom_col() +
+    geom_hline(yintercept = 0, color = "grey40") +
+    facet_wrap(~ Parameter_human, scales = "free_y", ncol = 6) +
+    labs(title = paste0("ACF (lags 1-", max(acf_df$Lag, na.rm=TRUE), ") — faceted (human labels)"),
+         x = "Lag", y = "ACF") +
+    theme_minimal(base_size = 10) +
+    theme(strip.text = element_text(size = 8))
+  print(p_acf_human)
+}
+
+if(exists("trace_df")){
+  trace_df$Parameter_human <- relabel_vec(as.character(trace_df$Parameter))
+  p_trace_human <- ggplot(trace_df, aes(x = iter, y = Value, color = chain)) +
+    geom_line(alpha = 0.6) +
+    facet_wrap(~ Parameter_human, scales = "free_y", ncol = 3) +
+    labs(title = paste0("Traceplots (human labels) — ", length(unique(trace_df$Parameter_human)), " params"),
+         x = "Iteration", y = "Value") +
+    theme_minimal(base_size = 10) +
+    theme(legend.position = "bottom", strip.text = element_text(size = 9))
+  print(p_trace_human)
+}
+
+# For caterpillar: map site param names if you want to label them differently (these are numeric site indices)
+if(exists("site_df")){
+  # site_df already used param names like b_site_home[1]; you can keep or create nicer labels.
+  site_df$site_label <- site_df$site
+  p_cat_human <- ggplot(site_df, aes(x = mean, y = reorder(site_label, mean))) +
+    geom_point() +
+    geom_errorbarh(aes(xmin = low, xmax = high), height = 0.2) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "grey40") +
+    labs(title = "Caterpillar: b_site_home (site index)", x = "Posterior mean (95% CI)", y = "site index") +
+    theme_minimal(base_size = 10)
+  print(p_cat_human)
+}
+
+# ----------------------------
+# 4) Binned residual plot (observed minus posterior-mean predicted probability)
+# ----------------------------
+
+# Compute posterior means for parameters used in param_order
+post_means <- colMeans(samples_matrix[, param_order, drop = FALSE])
+
+# Re-create linear predictor for each observation using the same parameterization as the JAGS model
+# Start with X*beta (X columns correspond to beta[1:NCOV])
+beta_from_post <- post_means[grepl("^beta\\[[0-9]+\\]", names(post_means))]
+# ensure ordering
+beta_idx <- as.integer(gsub("^beta\\[([0-9]+)\\]$", "\\1", names(beta_from_post)))
+beta_vec <- numeric(length = length(cov_names))
+beta_vec[beta_idx] <- as.numeric(beta_from_post[order(beta_idx)])
+# if lengths align, multiply; else warn
+if(length(beta_vec) != ncol(X)){
+  stop("beta vector length does not match ncol(X). Check cov_names and X ordering.")
+}
+
+lp_X <- as.numeric(X %*% beta_vec)
+
+# add intercept (beta0)
+if("beta0" %in% names(post_means)){
+  lp <- post_means["beta0"] + lp_X
+} else {
+  lp <- lp_X
+}
+
+# add age effect
+if("beta_age" %in% names(post_means)){
+  lp <- lp + post_means["beta_age"] * jags_data$age
+}
+
+# add categorical effects: race, tr, time
+# Build full vectors (including baseline = 0 at index 1)
+if(K_race > 1){
+  beta_race_means <- rep(0, K_race)
+  # find param names like beta_race[2]...
+  for(k in 2:K_race){
+    nm <- paste0("beta_race[", k, "]")
+    if(nm %in% names(post_means)) beta_race_means[k] <- post_means[nm]
+  }
+  lp <- lp + beta_race_means[jags_data$race]
+}
+if(K_tr > 1){
+  beta_tr_means <- rep(0, K_tr)
+  for(k in 2:K_tr){
+    nm <- paste0("beta_tr[", k, "]")
+    if(nm %in% names(post_means)) beta_tr_means[k] <- post_means[nm]
+  }
+  lp <- lp + beta_tr_means[jags_data$tr]
+}
+if(K_time > 1){
+  beta_time_means <- rep(0, K_time)
+  for(k in 2:K_time){
+    nm <- paste0("beta_time[", k, "]")
+    if(nm %in% names(post_means)) beta_time_means[k] <- post_means[nm]
+  }
+  lp <- lp + beta_time_means[jags_data$time]
+}
+
+# site random effects: use posterior means if present (b_site_home[s])
+site_params <- grep("^b_site_home\\[", colnames(samples_matrix), value = TRUE)
+if(length(site_params) > 0){
+  b_site_means <- colMeans(samples_matrix[, site_params, drop = FALSE])
+  # extract indices
+  site_idx_vec <- as.integer(gsub("^b_site_home\\[([0-9]+)\\]$", "\\1", names(b_site_means)))
+  b_site_full <- numeric(nsite)
+  b_site_full[site_idx_vec] <- b_site_means[order(site_idx_vec)]
+  lp <- lp + b_site_full[jags_data$site]
+}
+
+# predicted probability (posterior-mean linear predictor -> probability)
+p_hat <- plogis(lp)
+y_obs <- jags_data$Y
+
+# residuals: raw Pearson residuals (Y - p_hat)
+residuals_raw <- y_obs - p_hat
+
+# create bins (default 10 equal-width bins by p_hat)
+nbins <- 30
+bin_cut <- quantile(p_hat, probs = seq(0, 1, length.out = nbins + 1), na.rm = TRUE)
+# ensure unique breaks (handles ties)
+bin_cut <- unique(bin_cut)
+if(length(bin_cut) - 1 < nbins) {
+  # fallback to pretty equal-width
+  bin_cut <- seq(0, 1, length.out = nbins + 1)
+}
+bin_id <- cut(p_hat, breaks = bin_cut, include.lowest = TRUE, labels = FALSE)
+
+binned <- data.frame(
+  bin = bin_id,
+  p_hat = p_hat,
+  resid = residuals_raw
+) %>%
+  group_by(bin) %>%
+  summarize(
+    mean_p = mean(p_hat, na.rm = TRUE),
+    mean_resid = mean(resid, na.rm = TRUE),
+    sd_resid = sd(resid, na.rm = TRUE),
+    n = n(),
+    se_resid = sd_resid / sqrt(n),
+    lower95 = mean_resid - 1.96 * se_resid,
+    upper95 = mean_resid + 1.96 * se_resid,
+    .groups = "drop"
+  ) %>%
+  arrange(mean_p)
+
+# plot binned residuals
+p_binned <- ggplot(binned, aes(x = mean_p, y = mean_resid)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = lower95, ymax = upper95), width = 0.02) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey40") +
+  labs(
+    title = paste0("Binned residual plot for Bayesian model\n(", nbins, " bins): observed - predicted"),
+    x = "Mean predicted probability in bin",
+    y = "Mean residual (Y - p̂) with 95% CI"
+  ) +
+  theme_minimal(base_size = 12)
+
+print(p_binned)
+
+# Save binned residuals table
+write.csv(binned, "binned_residuals_table.csv", row.names = FALSE)
+
+cat("\nSaved mapping (jags_param_map.csv) and posterior summaries with human labels.\nBinned residual plot produced and binned_residuals_table.csv saved.\n")
+
+```
+
+
+```{r}
 # Focused diagnostics: Rhat, ESS, ACF (single faceted plot), Trace grid, Pairs, Caterpillar, Posterior table
 
 # ---------- helpers ----------
@@ -959,6 +1310,142 @@ print(problematic)
 cat("\nDone. All plots drawn to the active plotting device. If you want fewer/more panels or different selections (e.g., only parameters with ESS<200), tell me and I'll update the selection logic.\n")
 
 ```
+
+```{r}
+# ----------------------------
+# Posterior OR plot (forest) using posterior draws already in samples_matrix
+# - place after you have `samples_matrix`, `param_order`, `cov_names`, `strokes`
+# ----------------------------
+
+library(dplyr)
+library(ggplot2)
+
+# 1) If param_map doesn't already exist, build a mapping (same logic as earlier)
+if(!exists("param_map")){
+  human_labels <- character(length = length(param_order))
+  for(i in seq_along(param_order)){
+    p <- param_order[i]
+    if(p == "beta0"){
+      human_labels[i] <- "Intercept"
+      next
+    }
+    if(grepl("^beta\\[[0-9]+\\]", p)){
+      j <- as.integer(gsub("^beta\\[([0-9]+)\\]$", "\\1", p))
+      human_labels[i] <- if(j <= length(cov_names)) cov_names[j] else p
+      next
+    }
+    if(p == "beta_age"){
+      human_labels[i] <- "Age"
+      next
+    }
+    if(grepl("^beta_race\\[", p)){
+      k <- as.integer(gsub("^beta_race\\[([0-9]+)\\]$", "\\1", p))
+      levs <- levels(strokes$Race2)
+      human_labels[i] <- if(k >= 1 && k <= length(levs)) paste0("Race2_", levs[k]) else p
+      next
+    }
+    if(grepl("^beta_tr\\[", p)){
+      k <- as.integer(gsub("^beta_tr\\[([0-9]+)\\]$", "\\1", p))
+      levs <- levels(strokes$TransportNotify)
+      human_labels[i] <- if(k >= 1 && k <= length(levs)) paste0("TransportNotify_", levs[k]) else p
+      next
+    }
+    if(grepl("^beta_time\\[", p)){
+      k <- as.integer(gsub("^beta_time\\[([0-9]+)\\]$", "\\1", p))
+      levs <- levels(strokes$Time2)
+      human_labels[i] <- if(k >= 1 && k <= length(levs)) paste0("Time2", levs[k]) else p
+      next
+    }
+    # fallback
+    human_labels[i] <- p
+  }
+  param_map <- data.frame(jags_param = param_order, human_label = human_labels, stringsAsFactors = FALSE)
+  write.csv(param_map, "jags_param_map_for_forest.csv", row.names = FALSE)
+}
+
+# 2) Posterior summaries (log-odds)
+# Use samples_matrix and param_order to compute mean/median/CI on the log-odds scale
+if(!("samples_matrix" %in% ls())){
+  stop("samples_matrix not found. Create it with samples_matrix <- as.matrix(samples) or similar before running this block.")
+}
+
+# make sure param_order are present in samples_matrix columns
+present_params <- intersect(param_order, colnames(samples_matrix))
+if(length(present_params) == 0) stop("No parameters from param_order found in samples_matrix.")
+
+summ_list <- lapply(present_params, function(p){
+  draws <- samples_matrix[, p]
+  data.frame(
+    jags_param = p,
+    mean_log = mean(draws, na.rm = TRUE),
+    median_log = median(draws, na.rm = TRUE),
+    lower95_log = quantile(draws, 0.025, na.rm = TRUE),
+    upper95_log = quantile(draws, 0.975, na.rm = TRUE),
+    stringsAsFactors = FALSE
+  )
+}) %>% bind_rows()
+
+# attach human labels
+summ <- summ_list %>%
+  left_join(param_map, by = "jags_param")
+
+# 3) Keep only fixed-effects coefficients (drop intercept & random effects like b_site_home[...])
+# Remove intercept and any params that look like random effects (b_site_home[)
+summ <- summ %>%
+  filter(jags_param != "beta0") %>%                      # remove intercept
+  filter(!grepl("^b_site_home\\[", jags_param))          # remove site random effects
+
+# Optionally drop any other parameters you don't want (e.g. any hyperparameters)
+# e.g. filter(!grepl("tau_|pi_|beta_race\\[1\\]", jags_param))
+
+# 4) Convert to odds ratios
+summ <- summ %>%
+  mutate(
+    OR = exp(median_log),            # median on log-odds -> OR
+    OR_low = exp(lower95_log),
+    OR_high = exp(upper95_log),
+    label = human_label
+  )
+
+# If there are duplicate labels (e.g., multiple coefficients map to same human label), disambiguate:
+if(any(duplicated(summ$label))){
+  summ <- summ %>%
+    mutate(label = ifelse(duplicated(label), paste0(label, " (", jags_param, ")"), label))
+}
+
+# 5) Order factors so the largest OR is at top (like your screenshot)
+summ <- summ %>%
+  arrange(OR) %>%
+  mutate(label = factor(label, levels = label))
+
+# 6) Plot: horizontal forest of OR with 95% CrI
+p_or <- ggplot(summ, aes(x = OR, y = label)) +
+  geom_point(size = 3) +
+  geom_errorbarh(aes(xmin = OR_low, xmax = OR_high), height = 0.25) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey40") +
+  scale_x_continuous(expand = expansion(mult = c(0.02, 0.1))) +
+  labs(
+    title = "Posterior Odds Ratios (Median, 95% CrI)",
+    x = "Odds Ratio (Median) with 95% CrI",
+    y = ""
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text.y = element_text(size = 11)
+  )
+
+# print to device
+print(p_or)
+
+# Save the plot and the summary table
+ggsave("posterior_odds_ratios_forest.png", p_or, width = 9, height = 6, dpi = 300)
+write.csv(summ, "posterior_odds_ratios_table.csv", row.names = FALSE)
+
+cat("Saved 'posterior_odds_ratios_forest.png' and 'posterior_odds_ratios_table.csv'\n")
+
+```
+
 
 
 # MODIFIED IMPUTATION
