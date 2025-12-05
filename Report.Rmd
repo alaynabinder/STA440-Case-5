@@ -34,37 +34,35 @@ After initially imputing 20 new data sets using mice, we ran a frequentist logis
 
 # Our Model
 
-## Model rationale
+## Model rationale and implementation
 
 To model our binary outcome which represents positive or negative outcome with $Y_i = 1$ representing going to home or rehab, we adopted a Bayesian logistic regression. We fit a model where every covariate in the model had a simple relationship with the logistic link, but we did choose to incorporate a random intercept for sites due to independence concerns. To have independent observations, we believed it necessary to account for the random noise that the site introduced. An important component in the modeling process was tackling the missing data. In fact, our model also incorporated imputation for missing age, race, and transport/notification data.  
 
 We represent our final logistic model as $\text{logit}(p_i) = \beta_0 + \mathbf{X}_i^\top \boldsymbol{\beta} + \beta_{\text{age}} \cdot \text{age}_i + \beta_{\text{race}, \text{race}_i} + \beta_{\text{tr}, \text{tr}_i} + \beta_{\text{time}, \text{time}_i} + b_{\text{site}, \text{site}_i}$, where $\mathbf{X}_i$ captures other fixed covariates (like Gender), $\text{race}_i \in \{1,\dots,K_{\text{race}}\}$, $\text{tr}_i \in \{1,\dots,K_{\text{tr}}\}$, and $\text{time}_i \in \{1,\dots,K_{\text{time}}\}$ are categorical indices with baselines fixed at zero ($\beta_{\text{race},1} = \beta_{\text{tr},1} = \beta_{\text{time},1} = 0$), site random effects follow $b_{\text{site},s} \sim \mathcal{N}(0, \tau_{\text{home}}^{-1})$, and all fixed effects use vague priors $\beta_0, \boldsymbol{\beta}, \beta_{\text{age}}, \beta_{\text{race},k \ge 2}, \beta_{\text{tr},k \ge 2}, \beta_{\text{time},k \ge 2} \sim \mathcal{N}(0,1000)$ with $\tau_{\text{home}} \sim \text{Gamma}(0.01,0.01)$. The priors were chosen to allow the data inform the parameters. 
 
-We adopt a modeling pipeline to address missingness in age, race, EMSvsCar, and PreHospNotify. Our first consideration was the inherent relatedness of the EMSvsCar and the PreHospNotify variables. In fact, we see these variables are related because if someone rode in a car, there couldn't be a prehospital notification. For this reason, we created a new variable called transportNotify that had three levels representing the possible combinations of these two variables. From here, we imputed this covariate.
+We adopt a modeling pipeline to address missingness in age, race, EMSvsCar, and PreHospNotify. Our first consideration was the inherent relatedness of the `EMSvsCar` and the `PreHospNotify` variables. In fact, we see these variables are related because if someone rode in a car, there couldn't be a prehospital notification. For this reason, we created a new variable called `transportNotify` that had three levels representing the possible combinations of these two variables. From here, we imputed this covariate.
 
-Both transportNotify and age were imputed to rely on the non-missing features in the data as well as the random effects for site. We present transportNotify and age as categorical and normally distributed variables repsectively and set noninformative priors. Specifiically, for age we use the priors $\beta_{0,\text{age}} \sim \mathcal{N}(0,1000)$, $\tau_{\text{age}}, \tau_{b,\text{age}} \sim \text{Gamma}(0.01,0.01)$. For, the categorical transportNotify, we adopt $\text{Dirichlet}(\mathbf{1})$ priors. These priors were chosen to allow for data to inform the imputation. 
+Both `transportNotify` and age were imputed to rely on the non-missing features in the data as well as the random effects for site. We present `transportNotify` and age as categorical and normally distributed variables respectively and set noninformative priors. Specifiically, for age we use the priors $\beta_{0,\text{age}} \sim \mathcal{N}(0,1000)$, $\tau_{\text{age}}, \tau_{b,\text{age}} \sim \text{Gamma}(0.01,0.01)$. For, the categorical `transportNotify`, we adopt $\text{Dirichlet}(\mathbf{1})$ priors. These priors were chosen to allow for data to inform the imputation. 
 
 Race also necessitated imputation, and our group decided to follow the instruction of imputing race based on iste. We adopted dirichlet-categorical imputation where $\boldsymbol{\pi}_{\text{race}} \sim \text{Dirichlet}(\mathbf{1}_{K_{\text{race}}})$ so $\text{race}_i \sim \text{Categorical}(\boldsymbol{\pi}_{\text{race}})$. 
 
-One challenge in coding the JAGs model was ensuring cateogrical variables has baselines set, which was done to ensure reasonable interpretability of effects. 
+One challenge in coding the model was ensuring categorical variables has baselines set, which was done to ensure reasonable interpretability of effects. 
 
-## Model implementation
-
-<!-- TO-DO -->
+The model was implemented in JAGS and estimated using Markov chain Monte Carlo (MCMC). We ran three parallel chains for 20,000 iterations each, discarded an initial burn-in period, and applied thinning to reduce autocorrelation. All components of the model, including the logistic regression parameters and the imputation submodels for age, race, and `transportNotify`, were sampled jointly at each iteration. Missing covariates were treated as unknown parameters and drawn from their posterior predictive distributions during sampling, which allowed uncertainty from missing data to propagate appropriately into the posterior distribution of the outcome model.
 
 ## Model evaluation
 
-To examine convergence of our sampler, we examined traceplots (Figures XX), effective sample size (Table XX), and Rhat values (Table XX) for our parameters. Convergence diagnostics were strong for all parameters except for age, which is likely due to the fact that age was entirely missing for certain hospitals. Since we are imputing these age values each iteration of our sampler, there is a lot of variability and sensitivity in age. Still, the effective sample size for age is around 290 and we felt confident enough in our convergence to interpret results.
+To examine convergence of our sampler, we examined traceplots (Figures @ref(fig:fit1)), effective sample size (Table @ref(tab:fit2)), Rhat values (Table @ref(tab:fit3)), and autocorrelation function plots (Figure @ref(fig:fit4)) for our parameters. Convergence diagnostics were strong for all parameters except for age, which is likely due to the fact that age was entirely missing for certain hospitals. Since we are imputing these age values each iteration of our sampler, there is a lot of variability and sensitivity in age. Still, the effective sample size for age is around 290, and we felt confident enough in our convergence to interpret results.
 
-We also computed a binned residual plot again to compare it to our frequentist fit and examine model assumptions (Figure XX). We saw improvement in the residual plot in terms of randomness compared to our frequentist model, as there does not appear to be a trend in the residuals or any heteroskedascticity.
+We also computed a binned residual plot again to compare it to our frequentist fit and examine model assumptions (Figure @ref(fig:fit5)). We saw improvement in the residual plot in terms of randomness compared to our frequentist model, as there does not appear to be a trend in the residuals or any heteroskedascticity.
 
 ## Model results
 
-Table @ref(tag:bayes1) shows that the Bayesian model reaffirms the same core associations observed previously. Figure @ref(fig:bayes2) visualizes these effects on the odds ratio scale. Age shows the clearest effect, with a negative coefficient whose 95 percent credible interval lies entirely below zero, indicating a sharp decline in the odds of a favorable discharge as age increases. Female sex, thrombectomy, and thrombolysis complications likewise have posterior odds ratios credibly below one, reinforcing their consistent negative associations. In contrast, the TPA without complications group shows an odds ratio clearly above one, providing strong evidence of benefit and remaining the only treatment related factor with a reliably positive effect.
+Table @ref(tab:bayes1) shows that the Bayesian model reaffirms the same core associations observed previously. Figure @ref(fig:bayes2) visualizes these effects on the odds ratio scale. Age shows the most certain effect, with a negative coefficient and very small 95 percent credible interval that lies entirely below one, indicating a decline in the odds of favorable discharge as age increases. African American race, female sex, having thrombectomy, and thrombolysis/TPA complications likewise have posterior odds ratios credibly below one, reinforcing their negative associations. In contrast, the TPA without complications group shows an odds ratio clearly above one, providing strong evidence of improved odds of favorable discharge. The only other treatment related factor with a certain positive effect was patients who were not transported by EMS. The factor corresponding to patients who were transported by EMS but did not have pre-hospital notification did not appear to have a credibly large impact on discharge outcome, given its proximity to 1. 
 
-The time indicators exhibit partial overlap with one, suggesting uncertain but directionally positive improvement in outcomes across the program periods. The median effects increase across time, and while the credible intervals include values near one, the posterior still points toward slightly better outcomes later in the study.
+The time indicators show uncertain but generally positive shifts relative to the baseline period. The middle period overlaps substantially with the final period, but the latter has a higher median effect, indicating a modest trend toward better outcomes as the program matured. Although the credible intervals include values near one, the posterior still provides some evidence that the program was associated with improved discharge results.
 
-The Bayesian results closely parallel those from the frequentist model: almost all effect directions and substantive conclusions agree. The main difference is the narrower posterior credible intervals, which is expected because the Bayesian approach incorporates prior structure that stabilizes estimation and reduces uncertainty when the data strongly support a given effect.
+The Bayesian results are very similar to those from the frequentist model: almost all effect directions and substantive conclusions agree. The main difference is the narrower posterior credible intervals (compared to the confidence intervals), which is expected because the Bayesian approach incorporates prior structure that stabilizes estimation and reduces uncertainty when the data strongly support a given effect.
 
 # Shortcomings and Future Work
 
@@ -76,7 +74,7 @@ Finally, it may be worth looking into interactions between variables, which was 
 
 # Conclusion
 
-<!-- TO-DO -->
+In conclusion, we used a Bayesian logistic regression model with site-level random effects and integrated imputation to assess how demographic, clinical, and operational variables relate to the probability of favorable discharge to home or rehab. Age and treatment-related factors, particularly the presence or absence of complications, emerged as the strongest contributors to outcome, while patterns involving arrival mode and other patient characteristics were less definitive and may reflect differences in underlying severity rather than differences in care. The time indicators, evaluated relative to the baseline of the first two quarters, suggested modest improvement by the final two quarters, although these estimates were similar to those from the implementation period and remained uncertain. As a result, the evidence for a program-wide effect on outcomes is limited.
 
 \newpage
 
@@ -90,6 +88,9 @@ library(tidyverse)
 library(mice)
 library(pROC)
 library(rjags)
+library(coda)
+library(ggforce)
+library(purrr)
 library(coda)
 ```
 
@@ -576,7 +577,8 @@ jmod <- jags.model(file = "model_impute_all_fixed_gender.txt",
                    data = jags_data,
                    inits = inits_list,
                    n.chains = 3,
-                   n.adapt = 1000)
+                   n.adapt = 1000,
+                   quiet = TRUE)
 update(jmod, 2000)
 
 monitor_vars <- c("beta0","beta","beta_age","beta_race","beta_tr","beta_time","b_site_home")
@@ -616,17 +618,17 @@ coef_samples <- samples_matrix[, param_order, drop=FALSE]
 
 ```{r label = bayes1, echo = FALSE, warning = FALSE, message = FALSE}
 
-summary_df <- data.frame(
+data.frame(
   Variable = coef_names,
   Median = apply(coef_samples, 2, median),
   Lower95 = apply(coef_samples, 2, quantile, probs=0.025),
   Upper95 = apply(coef_samples, 2, quantile, probs=0.975)
 ) %>%
   mutate(across(2:4, round, 3)) %>%
-  kableExtra::kable(caption = "Posterior Summary Statistics (Median and 95% Credible Intervals)")
-
-summary_df
+  kableExtra::kable(caption = "Posterior Summary Statistics")
 ```
+
+\newpage
 
 ```{r label = bayes2, echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "Posterior Odds Ratio with 95% Credible Interval", fig.show = 'hold'}
 
@@ -656,10 +658,10 @@ or_tab <- or_tab %>%
     OR_high = exp(upper95_log)
   )
 
-# order for plotting (adjust to taste)
+# order for plotting 
 or_tab <- or_tab %>%
   arrange(OR) %>%
-  mutate(label = factor(label, levels = label))   # keeps arranged order (bottom -> top)
+  mutate(label = factor(label, levels = label))
 
 # plot
 p_or_med <- ggplot(or_tab, aes(x = OR, y = label)) +
@@ -668,7 +670,7 @@ p_or_med <- ggplot(or_tab, aes(x = OR, y = label)) +
   geom_vline(xintercept = 1, linetype = "dashed", color = "grey40") +
   scale_x_continuous(expand = expansion(mult = c(0.02, 0.1))) +
   labs(
-    title = "Posterior Odds Ratios (Median, 95% CrI)",
+    title = "Posterior Odds Ratios",
     x = "Odds Ratio (Median) with 95% CrI",
     y = ""
   ) +
@@ -678,7 +680,286 @@ p_or_med <- ggplot(or_tab, aes(x = OR, y = label)) +
 print(p_or_med)
 ```
 
+```{r label = fit1, echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "Traceplots for all parameters", fig.show = 'hold'}
 
+# ---------- Helper Functions ----------
+as_matrix_draws <- function(mcl) {
+  do.call(rbind, lapply(mcl, function(x) as.matrix(x)))
+}
+
+safe_gelman <- function(mcl){
+  tryCatch(
+    gelman.diag(mcl, multivariate = FALSE),
+    error = function(e) {
+      message("gelman.diag error: ", e$message)
+      return(NULL)
+    }
+  )
+}
+
+extract_psrf <- function(gel) {
+  if(is.null(gel)) return(NULL)
+  psrf <- as.data.frame(gel$psrf)
+  if(ncol(psrf) >= 1) {
+    colnames(psrf) <- make.names(colnames(psrf))
+    rhat_col <- colnames(psrf)[1]
+    rhat_upper_col <- if(ncol(psrf) >= 2) colnames(psrf)[2] else NA
+    rhat_df <- data.frame(
+      Parameter = rownames(psrf),
+      Rhat = as.numeric(psrf[[rhat_col]]),
+      Rhat_upper = if(!is.na(rhat_upper_col)) as.numeric(psrf[[rhat_upper_col]]) else NA,
+      stringsAsFactors = FALSE
+    )
+    return(rhat_df)
+  }
+  return(NULL)
+}
+
+# ---------- Basic Setup ----------
+samples_mat <- as_matrix_draws(samples)
+param_names <- colnames(samples_mat)
+n_params <- length(param_names)
+
+cat("Chains:", length(samples), 
+    " Total draws:", nrow(samples_mat), 
+    " Parameters:", n_params, "\n\n")
+
+# ---------- 1) TRACEPLOTS ----------
+# Prepare long-format data
+mcmc_long <- bind_rows(lapply(seq_along(samples), function(ci){
+  mat <- as.matrix(samples[[ci]])
+  df <- as.data.frame(mat)
+  df$iter <- seq_len(nrow(df))
+  df$chain <- paste0("Chain ", ci)
+  pivot_longer(df, cols = -c(iter, chain), 
+               names_to = "Parameter", 
+               values_to = "Value")
+}))
+
+# Create traceplots in batches of 12 for readability
+params_per_page <- 12
+n_pages <- ceiling(n_params / params_per_page)
+
+for(page in 1:n_pages){
+  start_idx <- (page - 1) * params_per_page + 1
+  end_idx <- min(page * params_per_page, n_params)
+  page_params <- param_names[start_idx:end_idx]
+  
+  trace_df <- mcmc_long %>% filter(Parameter %in% page_params)
+  
+  p_trace <- ggplot(trace_df, aes(x = iter, y = Value, color = chain)) +
+    geom_line(alpha = 0.7, linewidth = 0.3) +
+    facet_wrap(~ Parameter, scales = "free_y", ncol = 3) +
+    labs(
+      title = paste0("Traceplots (Page ", page, " of ", n_pages, ")"),
+      x = "Iteration",
+      y = "Value",
+      color = ""
+    ) +
+    theme_minimal(base_size = 10) +
+    theme(
+      legend.position = "bottom",
+      strip.text = element_text(size = 8, face = "bold"),
+      panel.spacing = unit(0.5, "lines")
+    )
+  
+  print(p_trace)
+}
+```
+
+```{r label = fit2, echo = FALSE, warning = FALSE, message = FALSE}
+
+# ---------- 2) EFFECTIVE SAMPLE SIZE TABLE ----------
+ess_vals <- effectiveSize(samples)
+ess_df <- data.frame(
+  Parameter = names(ess_vals),
+  ESS = round(as.numeric(ess_vals), 1)
+) %>%
+  arrange(ESS)
+
+cat("\nEffective Sample Size (lowest first):\n")
+kableExtra::kable(
+  ess_df,
+  caption = "Effective sample size for all parameters",
+  col.names = c("Parameter", "Effective Sample Size")
+)
+```
+
+```{r label = fit3, echo = FALSE, warning = FALSE, message = FALSE}
+
+# ---------- 3) R-HAT TABLE ----------
+gel <- safe_gelman(samples)
+rhat_df <- extract_psrf(gel)
+
+rhat_df <- rhat_df %>%
+  mutate(Rhat = round(Rhat, 4),
+         Rhat_upper = round(Rhat_upper, 4)) %>%
+  arrange(desc(Rhat))
+  
+cat("\nR-hat Values (highest first):\n")
+kableExtra::kable(
+  rhat_df,
+  caption = "Gelman-Rubin Diagnostic (R-hat) for All Parameters",
+  col.names = c("Parameter", "Point Estimate", "Upper CI")
+)
+```
+
+```{r label = fit4, echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "ACF plots for all parameters", fig.show = 'hold'}
+
+# ---------- 4) ACF PLOTS ----------
+# Select parameters with lowest ESS for ACF inspection
+max_lag <- 30
+n_acf_params <- min(24, n_params)
+acf_candidates <- ess_df$Parameter[1:n_acf_params]
+
+acf_list <- lapply(acf_candidates, function(p){
+  vals <- samples_mat[, p]
+  a <- acf(vals, plot = FALSE, lag.max = max_lag)
+  data.frame(
+    Parameter = p,
+    Lag = as.integer(a$lag[,1,1]),
+    ACF = as.numeric(a$acf[,1,1]),
+    stringsAsFactors = FALSE
+  )
+})
+
+acf_df <- bind_rows(acf_list) %>% filter(Lag > 0)
+
+p_acf <- ggplot(acf_df, aes(x = Lag, y = ACF)) +
+  geom_col(fill = "steelblue") +
+  geom_hline(yintercept = 0, color = "grey40") +
+  facet_wrap(~ Parameter, scales = "free_y", ncol = 6) +
+  labs(
+    title = paste0("Autocorrelation Function"),
+    x = "Lag",
+    y = "ACF"
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(
+    strip.text = element_text(size = 8, face = "bold"),
+    panel.spacing = unit(0.3, "lines")
+  )
+
+print(p_acf)
+```
+
+```{r label = fit5, echo = FALSE, warning = FALSE, message = FALSE, fig.cap = "Bayesian binned residual plot", fig.show = 'hold'}
+
+# Compute posterior means for parameters used in param_order
+post_means <- colMeans(samples_matrix[, param_order, drop = FALSE])
+
+# Re-create linear predictor for each observation using the same parameterization as the JAGS model
+# Start with X*beta (X columns correspond to beta[1:NCOV])
+beta_from_post <- post_means[grepl("^beta\\[[0-9]+\\]", names(post_means))]
+# ensure ordering
+beta_idx <- as.integer(gsub("^beta\\[([0-9]+)\\]$", "\\1", names(beta_from_post)))
+beta_vec <- numeric(length = length(cov_names))
+beta_vec[beta_idx] <- as.numeric(beta_from_post[order(beta_idx)])
+
+lp_X <- as.numeric(X %*% beta_vec)
+
+# add intercept (beta0)
+if("beta0" %in% names(post_means)){
+  lp <- post_means["beta0"] + lp_X
+} else {
+  lp <- lp_X
+}
+
+# add age effect
+if("beta_age" %in% names(post_means)){
+  lp <- lp + post_means["beta_age"] * jags_data$age
+}
+
+# add categorical effects: race, tr, time
+# Build full vectors (including baseline = 0 at index 1)
+if(K_race > 1){
+  beta_race_means <- rep(0, K_race)
+  # find param names like beta_race[2]...
+  for(k in 2:K_race){
+    nm <- paste0("beta_race[", k, "]")
+    if(nm %in% names(post_means)) beta_race_means[k] <- post_means[nm]
+  }
+  lp <- lp + beta_race_means[jags_data$race]
+}
+if(K_tr > 1){
+  beta_tr_means <- rep(0, K_tr)
+  for(k in 2:K_tr){
+    nm <- paste0("beta_tr[", k, "]")
+    if(nm %in% names(post_means)) beta_tr_means[k] <- post_means[nm]
+  }
+  lp <- lp + beta_tr_means[jags_data$tr]
+}
+if(K_time > 1){
+  beta_time_means <- rep(0, K_time)
+  for(k in 2:K_time){
+    nm <- paste0("beta_time[", k, "]")
+    if(nm %in% names(post_means)) beta_time_means[k] <- post_means[nm]
+  }
+  lp <- lp + beta_time_means[jags_data$time]
+}
+
+# site random effects: use posterior means if present (b_site_home[s])
+site_params <- grep("^b_site_home\\[", colnames(samples_matrix), value = TRUE)
+if(length(site_params) > 0){
+  b_site_means <- colMeans(samples_matrix[, site_params, drop = FALSE])
+  # extract indices
+  site_idx_vec <- as.integer(gsub("^b_site_home\\[([0-9]+)\\]$", "\\1", names(b_site_means)))
+  b_site_full <- numeric(nsite)
+  b_site_full[site_idx_vec] <- b_site_means[order(site_idx_vec)]
+  lp <- lp + b_site_full[jags_data$site]
+}
+
+# predicted probability (posterior-mean linear predictor -> probability)
+p_hat <- plogis(lp)
+y_obs <- jags_data$Y
+
+# residuals: raw Pearson residuals (Y - p_hat)
+residuals_raw <- y_obs - p_hat
+
+# create bins (default 10 equal-width bins by p_hat)
+nbins <- 30
+bin_cut <- quantile(p_hat, probs = seq(0, 1, length.out = nbins + 1), na.rm = TRUE)
+# ensure unique breaks (handles ties)
+bin_cut <- unique(bin_cut)
+if(length(bin_cut) - 1 < nbins) {
+  # fallback to pretty equal-width
+  bin_cut <- seq(0, 1, length.out = nbins + 1)
+}
+bin_id <- cut(p_hat, breaks = bin_cut, include.lowest = TRUE, labels = FALSE)
+
+binned <- data.frame(
+  bin = bin_id,
+  p_hat = p_hat,
+  resid = residuals_raw
+) %>%
+  group_by(bin) %>%
+  summarize(
+    mean_p = mean(p_hat, na.rm = TRUE),
+    mean_resid = mean(resid, na.rm = TRUE),
+    sd_resid = sd(resid, na.rm = TRUE),
+    n = n(),
+    se_resid = sd_resid / sqrt(n),
+    lower95 = mean_resid - 1.96 * se_resid,
+    upper95 = mean_resid + 1.96 * se_resid,
+    .groups = "drop"
+  ) %>%
+  arrange(mean_p)
+
+# plot binned residuals
+p_binned <- ggplot(binned, aes(x = mean_p, y = mean_resid)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = lower95, ymax = upper95), width = 0.02) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey40") +
+  labs(
+    title = paste0("Binned residual plot for Bayesian model"),
+    x = "Mean predicted probability in bin",
+    y = "Mean residual with 95% CrI"
+  ) +
+  theme_minimal(base_size = 12)
+
+
+print(p_binned)
+```
 
 
 
